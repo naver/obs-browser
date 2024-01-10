@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <title>PRISM | Browser Panel</title>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta name="keywords" content="PRISM,PRISM Live Studio,Stream,Video,Live Streaming,Recording,Games,Twitch,YouTube,Livestream,Open Broadcaster Software">
+
+    <meta name="obs-width" content="800">
+    <meta name="obs-height" content="600">
+    <meta name="obs-fps" content="60">
+    <meta name="obs-shutdown" content="true">
+    <meta name="obs-refresh" content="false">
+
+    <meta name="obs-browser" content="width=800,height=600,fps=60,shutdown=true,refresh=false">
+
+
+    <!-- 	<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+            <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
+            <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"> -->
+
+    <style>
+        /* Style reset */
+        /* http://meyerweb.com/eric/tools/css/reset/
+            v2.0 | 20110126
+            License: none (public domain)
+        */
+
+        html, body, div, span, applet, object, iframe,
+        h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+        a, abbr, acronym, address, big, cite, code,
+        del, dfn, em, img, ins, kbd, q, s, samp,
+        small, strike, strong, sub, sup, tt, var,
+        b, u, i, center,
+        dl, dt, dd, ol, ul, li,
+        fieldset, form, label, legend,
+        table, caption, tbody, tfoot, thead, tr, th, td,
+        article, aside, canvas, details, embed,
+        figure, figcaption, footer, header, hgroup,
+        menu, nav, output, ruby, section, summary,
+        time, mark, audio, video {
+            margin: 0;
+            padding: 0;
+            border: 0;
+            font-size: 100%;
+            font: inherit;
+            vertical-align: baseline;
+        }
+
+        /* HTML5 display-role reset for older browsers */
+        article, aside, details, figcaption, figure,
+        footer, header, hgroup, menu, nav, section {
+            display: block;
+        }
+
+        body {
+            line-height: 1;
+            draggable: false;
+        }
+
+        ol, ul {
+            list-style: none;
+        }
+
+        blockquote, q {
+            quotes: none;
+        }
+
+        blockquote:before, blockquote:after,
+        q:before, q:after {
+            content: '';
+            content: none;
+        }
+
+        table {
+            border-collapse: collapse;
+            border-spacing: 0;
+        }
+
+        /* End of style reset */
+
+        body {
+            font-family: "-apple-system", "BlinkMacSystemFont", "sans-serif",  "Malgun Gothic", "Segoe UI", "Dotum,Gulim";
+            color: #BABABA;
+        }
+
+        p + h1, p + h2, p + h3, p + h4, p + h5 {
+            margin-top: 32px;
+        }
+        p + p {
+            margin-top: 10px;
+        }
+        span + p{
+            margin-top: 22px;
+        }
+        .main_slant {
+            position: absolute;
+            width: 200%;
+            left: -50%;
+        }
+
+        #bg_slant1 {
+            left: -80%;
+            bottom: -20%;
+            height: 75%;
+            width: 250%;
+            background: #202d6f;
+            transform: rotate(15deg);
+        }
+
+        #bg_slant2 {
+            height: 200px;
+            background: #1c2b71;
+            transform: rotate(1deg);
+            top: -50px;
+        }
+
+        #bg_slant3 {
+            height: 500px;
+            background: #0C1633;
+            transform: rotate(-8deg);
+            bottom: -200px;
+        }
+
+        body{
+            background: %%BG_COLOR%%;;
+        }
+        .bs-page {
+            min-height: 250px;
+            background: %%BG_COLOR%%;
+            position: relative;
+			font-size: 12px;
+            text-align: center;
+            padding: 2%;
+            width: 100vw;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 18px;
+            color: #5D5D5D;
+        }
+
+        .bs-container {
+            position: relative;
+            max-width: 800px;
+            margin: 0px auto;
+        }
+        #error-desc {
+			line-height: 20px;
+			color: #BABABA;
+			text-align: center;
+			font-size: 14px;
+			font-style: normal;
+        }
+        .bs-image,
+        #Layer_1 {
+            display: block;
+            width: 130px;
+            margin: 10px auto 30px;
+            margin-bottom: 0px;
+        }
+
+        .bold {
+            font-weight: bold;
+        }
+
+        #error-url {
+            overflow-wrap: break-word;
+        }
+
+        #retry-link {
+            display: inline-block;
+            height: 27px;
+            line-height: 27px;
+            outline: none;
+            text-decoration: none; /* 删除下划线 */
+            color: #BABABA; /* 继承父元素的文本颜色 */
+            border-radius: 3px;
+            padding: 0 30px;
+            border: 1px solid #3D3D3D;
+            draggable: false;
+        }
+        #retry-link:hover {
+            color: white;
+            border: 1px solid white;
+        }
+        #retry-link:active {
+            color: #BABABA;
+            border: 1px solid #BABABA;
+        }
+
+        #wrapper{
+            min-height: 250px;
+            overflow: hidden;
+        }
+
+
+        ::-webkit-scrollbar-track-piece {
+            border-radius: 0;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb:vertical {
+            width: 3px;
+            height: 5px;
+            background-color: #444444;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:horizontal {
+            width: 3px;
+            height: 5px;
+            background-color: #444444;
+            border-radius: 4px;
+        }
+
+        ::-webkit-input-placeholder {
+            color: #666;
+        }
+
+        ::-webkit-scrollbar-corner {
+            background-color: #444444;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<div id="wrapper">
+
+    <div class="bs-page">
+
+        <!-- 				<div id="bg_slant1" class="main_slant"></div>
+                        <div id="bg_slant2" class="main_slant"></div>
+                        <div id="bg_slant3" class="main_slant"></div> -->
+
+        <div class="bs-container">
+            <span><svg width="90" height="75" viewBox="0 0 90 75" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g id="ic_error_froxy">
+                    <path id="Vector" d="M12.443 71.9264C3.7775 71.9264 0.468847 65.9235 5.08521 58.5972L36.612 8.49473C41.2283 1.16842 48.7752 1.16842 53.3916 8.49473L84.9183 58.5972C89.5347 65.9393 86.2103 71.9264 77.5448 71.9264H12.443Z" stroke="#666666" stroke-width="5"
+                          stroke-linejoin="round" />
+                    <path id="Vector_2" d="M45.7826 20.3586H44.2071C42.9018 20.3586 41.8438 21.4167 41.8438 22.722V47.9308C41.8438 49.236 42.9018 50.2941 44.2071 50.2941H45.7826C47.0879 50.2941 48.1459 49.236 48.1459 47.9308V22.722C48.1459 21.4167 47.0879 20.3586 45.7826 20.3586Z" fill="#666666" />
+                    <path id="Vector_3" d="M45.7826 55.0209H44.2071C42.9018 55.0209 41.8438 56.079 41.8438 57.3842V59.0228C41.8438 60.328 42.9018 61.3861 44.2071 61.3861H45.7826C47.0879 61.3861 48.1459 60.328 48.1459 59.0228V57.3842C48.1459 56.079 47.0879 55.0209 45.7826 55.0209Z" fill="#666666" />
+                </g>
+            </svg></span>
+            <!-- <p>Error.Title</p> -->
+            <p><span id="error-desc">Error.Title<br>Error.Description</span><br /></p>
+            <p><span id="error-string">%%ERROR_CODE%%</span><br />
+             <span class="bold">URL</span>: <span id="error-url">%%ERROR_URL%%</span></p>
+                         <span></span>
+            <p><a href="%%ERROR_URL%%" id="retry-link" draggable="false">Error.Retry</a>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
