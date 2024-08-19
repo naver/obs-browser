@@ -1,6 +1,6 @@
 /******************************************************************************
  Copyright (C) 2014 by John R. Bradley <jrb@turrettech.com>
- Copyright (C) 2018 by Hugh Bailey ("Jim") <jim@obsproject.com>
+ Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -19,7 +19,7 @@
 #include "browser-client.hpp"
 #include "obs-browser-source.hpp"
 #include "base64/base64.hpp"
-#include "json11/json11.hpp"
+#include <nlohmann/json.hpp>
 #include <obs-frontend-api.h>
 #include <pls-frontend-api.h>
 #include <obs.hpp>
@@ -30,8 +30,6 @@
 #if defined(__APPLE__) && CHROME_VERSION_BUILD > 4430
 #include <IOSurface/IOSurface.h>
 #endif
-
-using namespace json11;
 
 inline bool BrowserClient::valid() const
 {
@@ -85,9 +83,10 @@ CefRefPtr<CefResourceRequestHandler> BrowserClient::GetResourceRequestHandler(
 	return nullptr;
 }
 
-CefResourceRequestHandler::ReturnValue BrowserClient::OnBeforeResourceLoad(
-	CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>,
-	CefRefPtr<CefCallback>)
+CefResourceRequestHandler::ReturnValue
+BrowserClient::OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+				    CefRefPtr<CefRequest>,
+				    CefRefPtr<CefCallback>)
 {
 	return RV_CONTINUE;
 }
@@ -119,7 +118,7 @@ bool BrowserClient::OnProcessMessageReceived(
 {
 	const std::string &name = message->GetName();
 	CefRefPtr<CefListValue> input_args = message->GetArgumentList();
-	Json json;
+	nlohmann::json json;
 
 	if (!valid()) {
 		return false;
@@ -206,7 +205,7 @@ bool BrowserClient::OnProcessMessageReceived(
 		if (name == "getScenes") {
 			struct obs_frontend_source_list list = {};
 			obs_frontend_get_scenes(&list);
-			std::vector<const char *> scenes_vector;
+			std::vector<nlohmann::json> scenes_vector;
 			for (size_t i = 0; i < list.sources.num; i++) {
 				obs_source_t *source = list.sources.array[i];
 				scenes_vector.push_back(
@@ -225,16 +224,14 @@ bool BrowserClient::OnProcessMessageReceived(
 			if (!name)
 				return false;
 
-			json = Json::object{
-				{"name", name},
-				{"width",
-				 (int)obs_source_get_width(current_scene)},
+			json = {{"name", name},
+				{"width", obs_source_get_width(current_scene)},
 				{"height",
-				 (int)obs_source_get_height(current_scene)}};
+				 obs_source_get_height(current_scene)}};
 		} else if (name == "getTransitions") {
 			struct obs_frontend_source_list list = {};
 			obs_frontend_get_transitions(&list);
-			std::vector<const char *> transitions_vector;
+			std::vector<nlohmann::json> transitions_vector;
 			for (size_t i = 0; i < list.sources.num; i++) {
 				obs_source_t *source = list.sources.array[i];
 				transitions_vector.push_back(
@@ -250,8 +247,7 @@ bool BrowserClient::OnProcessMessageReceived(
 		[[fallthrough]];
 	case ControlLevel::ReadObs:
 		if (name == "getStatus") {
-			json = Json::object{
-				{"recording", obs_frontend_recording_active()},
+			json = {{"recording", obs_frontend_recording_active()},
 				{"streaming", obs_frontend_streaming_active()},
 				{"recordingPaused",
 				 obs_frontend_recording_paused()},
@@ -300,17 +296,12 @@ void BrowserClient::GetViewRect(CefRefPtr<CefBrowser>, CefRect &rect)
 
 bool BrowserClient::OnTooltip(CefRefPtr<CefBrowser>, CefString &text)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 	std::string str_text = text;
 	QMetaObject::invokeMethod(
 		QCoreApplication::instance()->thread(), [str_text]() {
 			QToolTip::showText(QCursor::pos(), str_text.c_str());
 		});
 	return true;
-#else
-	UNUSED_PARAMETER(text);
-	return false;
-#endif
 }
 
 bool BrowserClient::OnCursorChange(CefRefPtr<CefBrowser> browser,
@@ -385,9 +376,9 @@ bool BrowserClient::GetScreenPoint(CefRefPtr<CefBrowser> browser, int viewX,
 	return false;
 }
 
-void BrowserClient::OnImeCompositionRangeChanged(
-	CefRefPtr<CefBrowser> browser, const CefRange &selected_range,
-	const RectList &character_bounds)
+void BrowserClient::OnImeCompositionRangeChanged(CefRefPtr<CefBrowser>,
+						 const CefRange &,
+						 const RectList &)
 {
 }
 
@@ -523,12 +514,16 @@ static speaker_layout GetSpeakerLayout(CefAudioHandler::ChannelLayout cefLayout)
 	case CEF_CHANNEL_LAYOUT_STEREO:
 		return SPEAKERS_STEREO; /**< Channels: FL, FR */
 	case CEF_CHANNEL_LAYOUT_2POINT1:
+	case CEF_CHANNEL_LAYOUT_2_1:
+	case CEF_CHANNEL_LAYOUT_SURROUND:
 		return SPEAKERS_2POINT1; /**< Channels: FL, FR, LFE */
 	case CEF_CHANNEL_LAYOUT_2_2:
 	case CEF_CHANNEL_LAYOUT_QUAD:
 	case CEF_CHANNEL_LAYOUT_4_0:
 		return SPEAKERS_4POINT0; /**< Channels: FL, FR, FC, RC */
 	case CEF_CHANNEL_LAYOUT_4_1:
+	case CEF_CHANNEL_LAYOUT_5_0:
+	case CEF_CHANNEL_LAYOUT_5_0_BACK:
 		return SPEAKERS_4POINT1; /**< Channels: FL, FR, FC, LFE, RC */
 	case CEF_CHANNEL_LAYOUT_5_1:
 	case CEF_CHANNEL_LAYOUT_5_1_BACK:
@@ -748,6 +743,11 @@ bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser>,
 
 	if (bs && bs->source)
 		sourceName = obs_source_get_name(bs->source);
+
+	//PRISM/Xiewei/20240204/#4365/log base64-encoded message
+	auto encodedMsg = base64_encode(message.ToString());
+	blog(errorLevel, "[obs-browser: '%s'] %s: %s (%s:%d)", sourceName, code,
+	     encodedMsg.c_str(), source.ToString().c_str(), line);
 
 	blog(errorLevel, "[obs-browser: '%s'] %s: %s (%s:%d)", sourceName, code,
 	     message.ToString().c_str(), source.ToString().c_str(), line);

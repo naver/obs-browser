@@ -47,9 +47,12 @@ void ExtractUnderlines(NSAttributedString *string,
 			cef_color_t color = ColorBLACK;
 			if (NSColor *colorAttr = [attrs
 				    objectForKey:NSUnderlineColorAttributeName]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 				color = CefColorFromNSColor([colorAttr
 					colorUsingColorSpaceName:
 						NSDeviceRGBColorSpace]);
+#pragma clang diagnostic pop
 			}
 			cef_composition_underline_t line = {
 				{static_cast<int>(range.location),
@@ -248,10 +251,10 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 {
 	NSRect screenRect = rect;
 	if (_superView) {
-		NSWindow *win = [self.superView window];
-		NSRect locationInWindow = [self.superView
-			convertRect:self.superView.bounds
-			     toView:nil];
+		NSView *_sView = self.superView;
+		NSWindow *win = [_sView window];
+		NSRect locationInWindow = [_sView convertRect:_sView.bounds
+						       toView:nil];
 		NSPoint po = [win convertPointToScreen:locationInWindow.origin];
 		po.y += win.frame.size.height - 40;
 

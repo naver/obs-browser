@@ -109,6 +109,9 @@ public:
 		CefContextMenuHandler::EventFlags event_flags) override;
 
 	/* CefLoadHandler */
+	virtual void OnLoadStart(CefRefPtr<CefBrowser> browser,
+				 CefRefPtr<CefFrame> frame,
+				 TransitionType transition_type) override;
 	virtual void OnLoadEnd(CefRefPtr<CefBrowser> browser,
 			       CefRefPtr<CefFrame> frame,
 			       int httpStatusCode) override;
@@ -143,6 +146,10 @@ public:
 			     CefRefPtr<CefFrame> frame,
 			     CefRefPtr<CefRequest> request,
 			     CefRefPtr<CefCallback> callback) override;
+
+	//PRISM/Renjinbo/20231124/#2094 crash. cef shutdown must wait for all browsers to close, otherwise it will crash.
+	void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
+	void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
 
 	//PRISM/Zhangdewen/20230117/#/libbrowser
 	QCefWidgetImpl *m_impl = nullptr;

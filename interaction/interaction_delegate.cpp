@@ -7,6 +7,7 @@
 #include "interaction_main_mac.h"
 #endif
 #include "interaction_window_helper.h"
+#include "pls/pls-source.h"
 #ifdef ENABLE_BROWSER_QT_LOOP
 #include <qthread.h>
 #include <qapplication.h>
@@ -162,6 +163,27 @@ void InteractionDelegate::OnInteractionShow(WindowHandle top_hwnd)
 {
 #if defined(_WIN32)
 	if (!::IsWindowVisible(top_hwnd)) {
+
+		HWND view_hwnd = interaction_ui->GetInteractionView();
+		if (view_hwnd) {
+			RECT rc;
+			GetClientRect(view_hwnd, &rc);
+
+			int cx = RectWidth(rc);
+			int cy = RectHeight(rc);
+
+			if (!interaction_display) {
+				CreateDisplay(view_hwnd, cx, cy);
+			} else {
+				if (cx != display_cx || cy != display_cy) {
+					obs_display_resize(interaction_display,
+							   cx, cy);
+					display_cx = cx;
+					display_cy = cy;
+				}
+			}
+		}
+
 		is_interaction_reshow = false;
 		ExecuteOnInteraction(
 			[](INTERACTION_PTR interaction) {
@@ -392,10 +414,12 @@ void InteractionDelegate::SetBrowserData(void *src, obs_data_t *data)
 		}
 
 		BrowserSource *bs = reinterpret_cast<BrowserSource *>(src);
-		if (0 == strcmp(method, "ShowInteract")) {
+		if (0 == strcmp(method, METHOD_SHOW_INTERACTION)) {
 			bs->interaction_delegate->ShowInteraction(true);
-		} else if (0 == strcmp(method, "HideInterct")) {
+		} else if (0 == strcmp(method, METHOD_HIDE_INTERACTION)) {
 			bs->interaction_delegate->ShowInteraction(false);
+		} else if (0 == strcmp(method, METHOD_REFRESH_BROWSER)) {
+			bs->Refresh();
 		}
 	}
 }

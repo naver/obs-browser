@@ -1,6 +1,6 @@
 /******************************************************************************
  Copyright (C) 2014 by John R. Bradley <jrb@turrettech.com>
- Copyright (C) 2018 by Hugh Bailey ("Jim") <jim@obsproject.com>
+ Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -27,15 +27,14 @@
 #include <sstream>
 #include <thread>
 #include <mutex>
+#include <nlohmann/json.hpp>
 
 #include "obs-browser-source.hpp"
 #include "browser-scheme.hpp"
 #include "browser-app.hpp"
 #include "browser-version.h"
-#include "browser-config.h"
 #include "pls-frontend-api.h"
 
-#include "json11/json11.hpp"
 #include "obs-websocket-api/obs-websocket-api.h"
 #include "cef-headers.hpp"
 //PRISM/Xiewei/20230202/for web browser interaction
@@ -53,6 +52,12 @@
 #include <QApplication>
 #include <QThread>
 #endif
+#include <QApplication>
+
+//PRISM/Chengbing/20231108/#/prism version
+#include <pls/pls-obs-api.h>
+//PRISM/Renjinbo/20240620/#/add debug port to debug alll cef client
+#include <QSettings>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-browser", "en-US")
@@ -62,7 +67,6 @@ MODULE_EXPORT const char *obs_module_description(void)
 }
 
 using namespace std;
-using namespace json11;
 
 static thread manager_thread;
 static bool manager_initialized = false;
@@ -74,6 +78,8 @@ static int adapterCount = 0;
 static std::wstring deviceId;
 
 bool hwaccel = false;
+
+std::atomic<bool> is_all_browers_close_done = true;
 
 /* ========================================================================= */
 
@@ -110,6 +116,24 @@ bool QueueCEFTask(std::function<void()> task)
 	while (!CefPostTask(TID_UI, t))
 		os_sleep_ms(5);
 	return true;
+}
+
+//PRISM/Renjinbo/20240620/#/add debug port to debug alll cef client
+static void addWebRemoteDebugPort(CefSettings &settings)
+{
+	int webDebugPort = 0;
+#ifdef _WIN32
+	webDebugPort = QSettings("NAVER Corporation", "Prism Live Studio")
+			       .value("WebPort", 0)
+			       .toInt();
+#elif defined(__APPLE__)
+	webDebugPort = QSettings("prismlive", "prismlivestudio")
+			       .value("WebPort", 0)
+			       .toInt();
+#endif
+	if (webDebugPort > 0) {
+		settings.remote_debugging_port = webDebugPort;
+	}
 }
 
 /* ========================================================================= */
@@ -192,9 +216,12 @@ static obs_properties_t *browser_source_get_properties(void *data)
 				OBS_TEXT_DEFAULT);
 
 	obs_properties_add_int(props, "width", obs_module_text("Width"), 1,
-			       4096, 1);
+			       8192, 1);
 	obs_properties_add_int(props, "height", obs_module_text("Height"), 1,
-			       4096, 1);
+			       8192, 1);
+
+	obs_properties_add_bool(props, "reroute_audio",
+				obs_module_text("RerouteAudio"));
 
 	obs_property_t *fps_set = obs_properties_add_bool(
 		props, "fps_custom", obs_module_text("CustomFrameRate"));
@@ -204,10 +231,8 @@ static obs_properties_t *browser_source_get_properties(void *data)
 	obs_property_set_enabled(fps_set, false);
 #endif
 
-	obs_properties_add_bool(props, "reroute_audio",
-				obs_module_text("RerouteAudio"));
-
 	obs_properties_add_int(props, "fps", obs_module_text("FPS"), 1, 60, 1);
+
 	obs_property_t *p = obs_properties_add_text(
 		props, "css", obs_module_text("CSS"), OBS_TEXT_MULTILINE);
 	obs_property_text_set_monospace(p, true);
@@ -328,6 +353,9 @@ static void BrowserInit(void)
 	uint32_t obs_min = (obs_ver >> 16) & 0xFF;
 	uint32_t obs_pat = obs_ver & 0xFFFF;
 
+	//PRISM/Renjinbo/20240620/#/add debug port to debug alll cef client
+	addWebRemoteDebugPort(settings);
+
 	/* This allows servers the ability to determine that browser panels and
 	 * browser sources are coming from OBS. */
 	std::stringstream prod_ver;
@@ -341,13 +369,10 @@ static void BrowserInit(void)
 		 << "." << std::to_string(obs_pat);
 
 	//PRISM/Zhangdewen/20230117/#/modify user agent
-#define VERSTR_I(major, minor, patch) #major "." #minor "." #patch
-#define VERSTR(major, minor, patch) VERSTR_I(major, minor, patch)
-	prod_ver << " NAVER(pc; prism; prism-pc; " VERSTR(
-		OBS_RELEASE_CANDIDATE_MAJOR, OBS_RELEASE_CANDIDATE_MINOR,
-		OBS_RELEASE_CANDIDATE_PATCH) ";)";
-#undef VERSTR_I
-#undef VERSTR
+	//PRISM/Chengbing/20231108/#/prism version
+	prod_ver << " NAVER(pc; prism; prism-pc; " << pls_prism_version_major()
+		 << "." << pls_prism_version_minor() << "."
+		 << pls_prism_version_patch() << ";)";
 
 #if CHROME_VERSION_BUILD >= 4472
 	CefString(&settings.user_agent_product) = prod_ver.str();
@@ -379,12 +404,13 @@ static void BrowserInit(void)
 		//PRISM/Zhangdewen/20230117/#/modify accept languange
 		accepted_languages = "en-US,en,ko-KR,ko";
 	}
+	//PRISM/Renjinbo/20230124/#2103/right menu local
+	CefString(&settings.locale) =
+		obs_locale.substr(0, obs_locale.find_last_of('-'));
 
 	BPtr<char> conf_path_abs = os_get_abs_path_ptr(conf_path);
-	QString localQt(obs_get_locale());
-	CefString(&settings.locale) =
-		localQt.split("-").first().toUtf8().constData();
 	CefString(&settings.accept_language_list) = accepted_languages;
+	settings.persist_user_preferences = 1;
 	CefString(&settings.cache_path) = conf_path_abs;
 #if !defined(__APPLE__) || defined(ENABLE_BROWSER_LEGACY)
 	char *abs_path = os_get_abs_path_ptr(path.c_str());
@@ -436,6 +462,9 @@ static void BrowserInit(void)
 
 static void BrowserShutdown(void)
 {
+#if !ENABLE_LOCAL_FILE_URL_SCHEME
+	CefClearSchemeHandlerFactories();
+#endif
 #ifdef ENABLE_BROWSER_QT_LOOP
 	while (messageObject.ExecuteNextBrowserTask())
 		;
@@ -580,55 +609,55 @@ static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 {
 	switch (event) {
 	case OBS_FRONTEND_EVENT_STREAMING_STARTING:
-		DispatchJSEvent("obsStreamingStarting", "");
+		DispatchJSEvent("obsStreamingStarting", "null");
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STARTED:
-		DispatchJSEvent("obsStreamingStarted", "");
+		DispatchJSEvent("obsStreamingStarted", "null");
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STOPPING:
-		DispatchJSEvent("obsStreamingStopping", "");
+		DispatchJSEvent("obsStreamingStopping", "null");
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STOPPED:
-		DispatchJSEvent("obsStreamingStopped", "");
+		DispatchJSEvent("obsStreamingStopped", "null");
 		break;
 	case OBS_FRONTEND_EVENT_RECORDING_STARTING:
-		DispatchJSEvent("obsRecordingStarting", "");
+		DispatchJSEvent("obsRecordingStarting", "null");
 		break;
 	case OBS_FRONTEND_EVENT_RECORDING_STARTED:
-		DispatchJSEvent("obsRecordingStarted", "");
+		DispatchJSEvent("obsRecordingStarted", "null");
 		break;
 	case OBS_FRONTEND_EVENT_RECORDING_PAUSED:
-		DispatchJSEvent("obsRecordingPaused", "");
+		DispatchJSEvent("obsRecordingPaused", "null");
 		break;
 	case OBS_FRONTEND_EVENT_RECORDING_UNPAUSED:
-		DispatchJSEvent("obsRecordingUnpaused", "");
+		DispatchJSEvent("obsRecordingUnpaused", "null");
 		break;
 	case OBS_FRONTEND_EVENT_RECORDING_STOPPING:
-		DispatchJSEvent("obsRecordingStopping", "");
+		DispatchJSEvent("obsRecordingStopping", "null");
 		break;
 	case OBS_FRONTEND_EVENT_RECORDING_STOPPED:
-		DispatchJSEvent("obsRecordingStopped", "");
+		DispatchJSEvent("obsRecordingStopped", "null");
 		break;
 	case OBS_FRONTEND_EVENT_REPLAY_BUFFER_STARTING:
-		DispatchJSEvent("obsReplaybufferStarting", "");
+		DispatchJSEvent("obsReplaybufferStarting", "null");
 		break;
 	case OBS_FRONTEND_EVENT_REPLAY_BUFFER_STARTED:
-		DispatchJSEvent("obsReplaybufferStarted", "");
+		DispatchJSEvent("obsReplaybufferStarted", "null");
 		break;
 	case OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED:
-		DispatchJSEvent("obsReplaybufferSaved", "");
+		DispatchJSEvent("obsReplaybufferSaved", "null");
 		break;
 	case OBS_FRONTEND_EVENT_REPLAY_BUFFER_STOPPING:
-		DispatchJSEvent("obsReplaybufferStopping", "");
+		DispatchJSEvent("obsReplaybufferStopping", "null");
 		break;
 	case OBS_FRONTEND_EVENT_REPLAY_BUFFER_STOPPED:
-		DispatchJSEvent("obsReplaybufferStopped", "");
+		DispatchJSEvent("obsReplaybufferStopped", "null");
 		break;
 	case OBS_FRONTEND_EVENT_VIRTUALCAM_STARTED:
-		DispatchJSEvent("obsVirtualcamStarted", "");
+		DispatchJSEvent("obsVirtualcamStarted", "null");
 		break;
 	case OBS_FRONTEND_EVENT_VIRTUALCAM_STOPPED:
-		DispatchJSEvent("obsVirtualcamStopped", "");
+		DispatchJSEvent("obsVirtualcamStopped", "null");
 		break;
 	case OBS_FRONTEND_EVENT_SCENE_CHANGED: {
 		OBSSourceAutoRelease source = obs_frontend_get_current_scene();
@@ -640,16 +669,61 @@ static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 		if (!name)
 			break;
 
-		Json json = Json::object{
-			{"name", name},
-			{"width", (int)obs_source_get_width(source)},
-			{"height", (int)obs_source_get_height(source)}};
+		nlohmann::json json = {{"name", name},
+				       {"width", obs_source_get_width(source)},
+				       {"height",
+					obs_source_get_height(source)}};
 
 		DispatchJSEvent("obsSceneChanged", json.dump());
 		break;
 	}
+	case OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED: {
+		struct obs_frontend_source_list list = {};
+		obs_frontend_get_scenes(&list);
+		std::vector<const char *> scenes_vector;
+		for (size_t i = 0; i < list.sources.num; i++) {
+			obs_source_t *source = list.sources.array[i];
+			scenes_vector.push_back(obs_source_get_name(source));
+		}
+		nlohmann::json json = scenes_vector;
+		obs_frontend_source_list_free(&list);
+
+		DispatchJSEvent("obsSceneListChanged", json.dump());
+		break;
+	}
+	case OBS_FRONTEND_EVENT_TRANSITION_CHANGED: {
+		OBSSourceAutoRelease source =
+			obs_frontend_get_current_transition();
+
+		if (!source)
+			break;
+
+		const char *name = obs_source_get_name(source);
+		if (!name)
+			break;
+
+		nlohmann::json json = {{"name", name}};
+
+		DispatchJSEvent("obsTransitionChanged", json.dump());
+		break;
+	}
+	case OBS_FRONTEND_EVENT_TRANSITION_LIST_CHANGED: {
+		struct obs_frontend_source_list list = {};
+		obs_frontend_get_transitions(&list);
+		std::vector<const char *> transitions_vector;
+		for (size_t i = 0; i < list.sources.num; i++) {
+			obs_source_t *source = list.sources.array[i];
+			transitions_vector.push_back(
+				obs_source_get_name(source));
+		}
+		nlohmann::json json = transitions_vector;
+		obs_frontend_source_list_free(&list);
+
+		DispatchJSEvent("obsTransitionListChanged", json.dump());
+		break;
+	}
 	case OBS_FRONTEND_EVENT_EXIT:
-		DispatchJSEvent("obsExit", "");
+		DispatchJSEvent("obsExit", "null");
 		break;
 	default:;
 	}
@@ -717,18 +791,6 @@ static void check_hwaccel_support(void)
 			device++;
 		}
 	}
-}
-#elif defined(__APPLE__)
-extern bool atLeast10_15(void);
-
-static void check_hwaccel_support(void)
-{
-	if (!atLeast10_15()) {
-		blog(LOG_INFO,
-		     "[obs-browser]: OS version older than 10.15 Disabling hwaccel");
-		hwaccel = false;
-	}
-	return;
 }
 #else
 static void check_hwaccel_support(void)
@@ -833,6 +895,18 @@ void obs_module_post_load(void)
 
 void obs_module_unload(void)
 {
+
+	//PRISM/Renjinbo/20231124/#2094 crash. cef shutdown must wait for all browsers to close, otherwise it will crash.
+	int maxWaitMs = 0;
+	while (!is_all_browers_close_done && maxWaitMs < 5000) {
+		qApp->processEvents();
+		maxWaitMs += 50;
+		os_sleep_ms(50);
+		blog(LOG_WARNING,
+		     "[obs-browser]: obs_module_unload: wait browser close time:%d ms, is all browser close:%d",
+		     maxWaitMs, is_all_browers_close_done.load());
+	}
+
 #ifdef ENABLE_BROWSER_QT_LOOP
 	BrowserShutdown();
 #else

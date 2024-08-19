@@ -16,7 +16,10 @@ class BrowserInteractionMain {
 public:
 	void SetInteractionInfo(int, int, CefRefPtr<CefBrowser>){};
 
-	bool GetScreenPoint(CefRefPtr<CefBrowser>, int, int, int &, int &){};
+	bool GetScreenPoint(CefRefPtr<CefBrowser>, int, int, int &, int &)
+	{
+		return false;
+	}
 };
 
 using INTERACTION_PTR = std::shared_ptr<BrowserInteractionMain>;

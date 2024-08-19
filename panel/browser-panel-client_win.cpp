@@ -10,6 +10,7 @@
 #include <QInputDialog>
 #include <QRegularExpression>
 #include <QLabel>
+#include <QClipboard>
 
 #include <obs-module.h>
 #ifdef _WIN32
@@ -23,6 +24,14 @@
 
 #define MENU_ITEM_DEVTOOLS MENU_ID_CUSTOM_FIRST
 #define MENU_ITEM_MUTE MENU_ID_CUSTOM_FIRST + 1
+#define MENU_ITEM_ZOOM_IN MENU_ID_CUSTOM_FIRST + 2
+#define MENU_ITEM_ZOOM_RESET MENU_ID_CUSTOM_FIRST + 3
+#define MENU_ITEM_ZOOM_OUT MENU_ID_CUSTOM_FIRST + 4
+#define MENU_ITEM_COPY_URL MENU_ID_CUSTOM_FIRST + 5
+
+//PRISM/Renjinbo/20231124/#2094 crash. cef shutdown must wait for all browsers to close, otherwise it will crash.
+static std::atomic<int> s_open_brower_count = 0;
+extern std::atomic<bool> is_all_browers_close_done;
 
 /* CefClient */
 CefRefPtr<CefLoadHandler> QCefBrowserClient::GetLoadHandler()
@@ -84,10 +93,13 @@ void QCefBrowserClient::OnTitleChange(CefRefPtr<CefBrowser> browser,
 		if (title.compare("DevTools") == 0)
 			return;
 
-		CefWindowHandle handle = browser->GetHost()->GetWindowHandle();
-
-#ifdef Q_OS_WIN
-		SetWindowTextW(handle, title.ToWString().c_str());
+#if defined(_WIN32)
+		CefWindowHandle handl = browser->GetHost()->GetWindowHandle();
+		std::wstring str_title = title;
+		SetWindowTextW((HWND)handl, str_title.c_str());
+#elif defined(__linux__)
+		CefWindowHandle handl = browser->GetHost()->GetWindowHandle();
+		XStoreName(cef_get_xdisplay(), handl, title.ToString().c_str());
 #endif
 	}
 }
@@ -255,7 +267,15 @@ void QCefBrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
 	if (model->IsVisible(MENU_ID_VIEW_SOURCE)) {
 		model->Remove(MENU_ID_VIEW_SOURCE);
 	}
+	model->AddItem(MENU_ITEM_ZOOM_IN, obs_module_text("Zoom.In"));
+	if (browser->GetHost()->GetZoomLevel() != 0) {
+		model->AddItem(MENU_ITEM_ZOOM_RESET,
+			       obs_module_text("Zoom.Reset"));
+	}
+	model->AddItem(MENU_ITEM_ZOOM_OUT, obs_module_text("Zoom.Out"));
 	model->AddSeparator();
+	model->InsertItemAt(model->GetCount(), MENU_ITEM_COPY_URL,
+			    obs_module_text("CopyUrl"));
 	model->InsertItemAt(model->GetCount(), MENU_ITEM_DEVTOOLS,
 			    obs_module_text("Inspect"));
 	model->InsertCheckItemAt(model->GetCount(), MENU_ITEM_MUTE,
@@ -343,7 +363,7 @@ bool QCefBrowserClient::OnContextMenuCommand(
 		windowInfo.SetAsPopup(host->GetWindowHandle(),
 				      title.toUtf8().constData());
 #endif
-		pos = QCursor::pos(); //widget->mapToGlobal(QPoint(0, 0));
+		pos = m_impl->mapToGlobal(QPoint(0, 0));
 		windowInfo.bounds.x = pos.x();
 		windowInfo.bounds.y = pos.y() + 30;
 		windowInfo.bounds.width = 900;
@@ -355,8 +375,52 @@ bool QCefBrowserClient::OnContextMenuCommand(
 	case MENU_ITEM_MUTE:
 		host->SetAudioMuted(!host->IsAudioMuted());
 		return true;
+	case MENU_ITEM_ZOOM_IN:
+		m_impl->zoomPage(1);
+		return true;
+	case MENU_ITEM_ZOOM_RESET:
+		m_impl->zoomPage(0);
+		return true;
+	case MENU_ITEM_ZOOM_OUT:
+		m_impl->zoomPage(-1);
+		return true;
+	case MENU_ITEM_COPY_URL:
+		std::string url = browser->GetMainFrame()->GetURL().ToString();
+		auto saveClipboard = [url]() {
+			QClipboard *clipboard = QApplication::clipboard();
+
+			clipboard->setText(url.c_str(), QClipboard::Clipboard);
+
+			if (clipboard->supportsSelection()) {
+				clipboard->setText(url.c_str(),
+						   QClipboard::Selection);
+			}
+		};
+		QMetaObject::invokeMethod(
+			QCoreApplication::instance()->thread(), saveClipboard);
+		return true;
+		break;
 	}
 	return false;
+}
+
+void QCefBrowserClient::OnLoadStart(CefRefPtr<CefBrowser>,
+				    CefRefPtr<CefFrame> frame, TransitionType)
+{
+	if (!frame->IsMain())
+		return;
+
+	//PRISM/Renjinbo/20240117/#3999/only dock disable close by js. the navershopping login should be closed.
+	cef_widgets_sync_call(m_impl, [frame](QCefWidgetImpl *impl) {
+		if (impl->m_isDockWidget) {
+			std::string script2 = "window.close = () => ";
+			script2 += "console.log(";
+			script2 +=
+				"'OBS browser docks cannot be closed using JavaScript.'";
+			script2 += ");";
+			frame->ExecuteJavaScript(script2, "", 0);
+		}
+	});
 }
 
 void QCefBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
@@ -407,7 +471,6 @@ bool QCefBrowserClient::OnJSDialog(CefRefPtr<CefBrowser>, const CefString &,
 				   CefRefPtr<CefJSDialogCallback> callback,
 				   bool &)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 	QString parentTitle; //widget->parentWidget()->windowTitle();
 	std::string default_value = default_prompt_text;
 	QString msg(message_text.ToString().c_str());
@@ -482,13 +545,6 @@ bool QCefBrowserClient::OnJSDialog(CefRefPtr<CefBrowser>, const CefString &,
 	QMetaObject::invokeMethod(QCoreApplication::instance()->thread(),
 				  msgbox);
 	return true;
-#else
-	UNUSED_PARAMETER(dialog_type);
-	UNUSED_PARAMETER(message_text);
-	UNUSED_PARAMETER(default_prompt_text);
-	UNUSED_PARAMETER(callback);
-	return false;
-#endif
 }
 
 bool QCefBrowserClient::OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
@@ -506,6 +562,21 @@ bool QCefBrowserClient::OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
 #endif
 		browser->ReloadIgnoreCache();
 		return true;
+	} else if ((event.windows_key_code == 189 ||
+		    event.windows_key_code == 109) &&
+		   (event.modifiers & EVENTFLAG_CONTROL_DOWN) != 0) {
+		// Zoom out
+		return m_impl->zoomPage(-1);
+	} else if ((event.windows_key_code == 187 ||
+		    event.windows_key_code == 107) &&
+		   (event.modifiers & EVENTFLAG_CONTROL_DOWN) != 0) {
+		// Zoom in
+		return m_impl->zoomPage(1);
+	} else if ((event.windows_key_code == 48 ||
+		    event.windows_key_code == 96) &&
+		   (event.modifiers & EVENTFLAG_CONTROL_DOWN) != 0) {
+		// Reset zoom
+		return m_impl->zoomPage(0);
 	}
 	return false;
 }
@@ -564,6 +635,26 @@ QCefBrowserClient::ReturnValue QCefBrowserClient::OnBeforeResourceLoad(
 	}
 	return RV_CONTINUE;
 }
+//PRISM/Renjinbo/20231124/#2094 crash. cef shutdown must wait for all browsers to close, otherwise it will crash.
+void QCefBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser)
+{
+	++s_open_brower_count;
+	blog(LOG_INFO, "[obs-browser]: browser OnAfterCreated count:%d",
+	     s_open_brower_count.load());
+	if (s_open_brower_count > 0) {
+		is_all_browers_close_done = false;
+	}
+}
+//PRISM/Renjinbo/20231124/#2094 crash. cef shutdown must wait for all browsers to close, otherwise it will crash.
+void QCefBrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser)
+{
+	--s_open_brower_count;
+	blog(LOG_INFO, "[obs-browser]: browser OnBeforeClose count:%d",
+	     s_open_brower_count.load());
+	if (s_open_brower_count <= 0) {
+		is_all_browers_close_done = true;
+	}
+}
 
 //PRISM/Zhangdewen/20210311/#6991/nelo crash, browser refactoring
 void QCefBrowserPopupClient::OnAfterCreated(CefRefPtr<CefBrowser> browser)
@@ -572,7 +663,7 @@ void QCefBrowserPopupClient::OnAfterCreated(CefRefPtr<CefBrowser> browser)
 		impl->attachBrowser(browser);
 	});
 
-	CefLifeSpanHandler::OnAfterCreated(browser);
+	QCefBrowserClient::OnAfterCreated(browser);
 }
 
 //PRISM/Zhangdewen/20210311/#6991/nelo crash, browser refactoring
@@ -583,5 +674,5 @@ bool QCefBrowserPopupClient::DoClose(CefRefPtr<CefBrowser> browser)
 		m_impl = nullptr;
 	});
 
-	return CefLifeSpanHandler::DoClose(browser);
+	return QCefBrowserClient::DoClose(browser);
 }

@@ -1,7 +1,7 @@
 #include "browser-panel-internal.hpp"
 #include "browser-panel-client.hpp"
 #include "cef-headers.hpp"
-#include "browser-app.hpp"
+#include "PLSBrowserPanel.h"
 
 #include <QWindow>
 #include <QApplication>
@@ -19,6 +19,7 @@
 #include <util/threading.h>
 #include <util/base.h>
 #include <thread>
+#include <cmath>
 
 #if !defined(_WIN32) && !defined(__APPLE__)
 #include <X11/Xlib.h>
@@ -33,6 +34,8 @@
 #include <qpointer.h>
 
 #include <Windows.h>
+//PRISM/Renjinbo/20240111/stop queue create cef when obs exiting
+#include "pls/pls-obs-api.h"
 
 extern bool QueueCEFTask(std::function<void()> task);
 extern "C" void obs_browser_initialize(void);
@@ -41,6 +44,9 @@ extern os_event_t *cef_started_event;
 std::mutex popup_whitelist_mutex;
 std::vector<PopupWhitelistInfo> popup_whitelist;
 std::vector<PopupWhitelistInfo> forced_popups;
+
+static int zoomLvls[] = {25,  33,  50,  67,  75,  80,  90,  100,
+			 110, 125, 150, 175, 200, 250, 300, 400};
 
 //PRISM/Zhangdewen/20230117/#/libbrowser
 static std::recursive_mutex cef_widgets_mutex;
@@ -135,12 +141,12 @@ public:
 //PRISM/Zhangdewen/20230117/#/libbrowser
 class CookieRead : public CefCookieVisitor {
 public:
-	std::function<void(const std::list<QCefCookieManager::Cookie> &)>
+	std::function<void(const std::list<PLSQCefCookieManager::Cookie> &)>
 		m_cookies_cb;
-	std::list<QCefCookieManager::Cookie> m_cookies;
+	std::list<PLSQCefCookieManager::Cookie> m_cookies;
 
 	inline CookieRead(const std::function<
-			  void(const std::list<QCefCookieManager::Cookie> &)>
+			  void(const std::list<PLSQCefCookieManager::Cookie> &)>
 				  &cookies_cb)
 		: m_cookies_cb(cookies_cb)
 	{
@@ -150,7 +156,7 @@ public:
 
 	virtual bool Visit(const CefCookie &cookie, int, int, bool &) override
 	{
-		m_cookies.push_back(QCefCookieManager::Cookie{
+		m_cookies.push_back(PLSQCefCookieManager::Cookie{
 			CefString(cookie.name.str).ToString(),
 			CefString(cookie.value.str).ToString(),
 			CefString(cookie.domain.str).ToString(),
@@ -162,7 +168,7 @@ public:
 	IMPLEMENT_REFCOUNTING(CookieRead);
 };
 
-struct QCefCookieManagerInternal : QCefCookieManager {
+struct QCefCookieManagerInternal : PLSQCefCookieManager {
 	CefRefPtr<CefCookieManager> cm;
 	CefRefPtr<CefRequestContext> rc;
 
@@ -179,6 +185,7 @@ struct QCefCookieManagerInternal : QCefCookieManager {
 		BPtr<char> path = os_get_abs_path_ptr(rpath.Get());
 
 		CefRequestContextSettings settings;
+		settings.persist_user_preferences = 1;
 		CefString(&settings.cache_path) = path.Get();
 		rc = CefRequestContext::CreateContext(
 			settings, CefRefPtr<CefRequestContextHandler>());
@@ -201,6 +208,7 @@ struct QCefCookieManagerInternal : QCefCookieManager {
 		BPtr<char> path = os_get_abs_path_ptr(rpath.Get());
 
 		CefRequestContextSettings settings;
+		settings.persist_user_preferences = 1;
 		CefString(&settings.cache_path) = storage_path;
 		rc = CefRequestContext::CreateContext(
 			settings, CefRefPtr<CefRequestContextHandler>());
@@ -333,6 +341,10 @@ void QCefWidgetImpl::init()
 		      bkgColor = CefColorSetARGB(0xff, m_initBkgColor.red(),
 						 m_initBkgColor.green(),
 						 m_initBkgColor.blue())]() {
+		//PRISM/Renjinbo/20240111/stop queue create cef when obs exiting
+		if (pls_get_obs_exiting())
+			return;
+
 		if (!cef_widgets_is_valid(this) || m_browser) {
 			return;
 		}
@@ -349,8 +361,6 @@ void QCefWidgetImpl::init()
 		m_browser = CefBrowserHost::CreateBrowserSync(
 			windowInfo, browserClient, m_url, cefBrowserSettings,
 			CefRefPtr<CefDictionaryValue>(), m_rqc);
-		resize(true);
-		resize(false);
 	});
 }
 
@@ -431,6 +441,59 @@ void QCefWidgetImpl::reloadPage()
 	if (m_browser) {
 		m_browser->ReloadIgnoreCache();
 	}
+}
+
+bool QCefWidgetImpl::zoomPage(int direction)
+{
+	if (!m_browser || direction < -1 || direction > 1)
+		return false;
+
+	CefRefPtr<CefBrowserHost> host = m_browser->GetHost();
+	if (direction == 0) {
+		// Reset zoom
+		host->SetZoomLevel(0);
+		return true;
+	}
+
+	int currentZoomPercent = round(pow(1.2, host->GetZoomLevel()) * 100.0);
+	int zoomCount = sizeof(zoomLvls) / sizeof(zoomLvls[0]);
+	int zoomIdx = 0;
+
+	while (zoomIdx < zoomCount) {
+		if (zoomLvls[zoomIdx] == currentZoomPercent) {
+			break;
+		}
+		zoomIdx++;
+	}
+	if (zoomIdx == zoomCount)
+		return false;
+
+	int newZoomIdx = zoomIdx;
+	if (direction == -1 && zoomIdx > 0) {
+		// Zoom out
+		newZoomIdx -= 1;
+	} else if (direction == 1 && zoomIdx >= 0 && zoomIdx < zoomCount - 1) {
+		// Zoom in
+		newZoomIdx += 1;
+	}
+
+	if (newZoomIdx != zoomIdx) {
+		int newZoomLvl = zoomLvls[newZoomIdx];
+		// SetZoomLevel only accepts a zoomLevel, not a percentage
+		host->SetZoomLevel(log(newZoomLvl / 100.0) / log(1.2));
+		return true;
+	}
+	return false;
+}
+
+void QCefWidgetImpl::executeJavaScript(const std::string &script)
+{
+	if (!m_browser)
+		return;
+
+	CefRefPtr<CefFrame> frame = m_browser->GetMainFrame();
+	std::string url = frame->GetURL();
+	frame->ExecuteJavaScript(script, url, 0);
 }
 
 //PRISM/Zhangdewen/20230117/#/libbrowser
@@ -515,7 +578,8 @@ void QCefWidgetImpl::detachBrowser()
 //PRISM/Zhangdewen/20230117/#/libbrowser
 void QCefWidgetImpl::onLoadEnded()
 {
-	if (m_showAtLoadEnded && !isVisible()) {
+	if (m_showAtLoadEnded && !isVisible() && parentWidget()) {
+		this->setGeometry(parentWidget()->rect());
 		show();
 	}
 }
@@ -530,7 +594,7 @@ QCefWidgetInternal::QCefWidgetInternal(QWidget *parent, const std::string &url,
 				       bool locked, const QColor &initBkgColor,
 				       const std::string &css,
 				       bool showAtLoadEnded)
-	: QCefWidget(parent)
+	: PLSQCefWidget(parent)
 {
 	//PRISM/Zhangdewen/20230117/#/libbrowser
 	obs_browser_initialize();
@@ -578,6 +642,24 @@ bool QCefWidgetInternal::event(QEvent *event)
 	if (event->type() == QEvent::ParentChange && m_impl) {
 		m_impl->resize(false);
 	}
+
+	//PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget
+	if (event->type() == QEvent::ShowToParent ||
+	    event->type() == QEvent::ParentChange) {
+		if (m_impl) {
+			bool isDockWidget = false;
+			QWidget *parent = m_impl;
+			while (parent) {
+				if (parent->inherits("QDockWidget")) {
+					isDockWidget = true;
+					break;
+				}
+				parent = parent->parentWidget();
+			}
+			m_impl->m_isDockWidget = isDockWidget;
+		}
+	}
+
 	return result;
 }
 
@@ -597,6 +679,11 @@ void QCefWidgetInternal::resizeEvent(QResizeEvent *event)
 	if (m_impl) {
 		m_impl->setGeometry(0, 0, event->size().width(),
 				    event->size().height());
+		//PRISM/Renjinbo/20231129/#3223/ui size error
+		if (event->oldSize() == QSize(-1, -1)) {
+			m_impl->resize(false, event->size());
+			m_impl->resize(true, event->size());
+		}
 	}
 }
 
@@ -616,12 +703,27 @@ void QCefWidgetInternal::setStartupScript(const std::string &script)
 	}
 }
 
+void QCefWidgetInternal::executeJavaScript(const std::string &script)
+{
+	if (m_impl) {
+		m_impl->executeJavaScript(script);
+	}
+}
+
 void QCefWidgetInternal::allowAllPopups(bool allow)
 {
 	//PRISM/Zhangdewen/20230117/#/libbrowser
 	if (m_impl) {
 		m_impl->m_allowPopups = allow;
 	}
+}
+
+bool QCefWidgetInternal::zoomPage(int direction)
+{
+	if (m_impl) {
+		return m_impl->zoomPage(direction);
+	}
+	return false;
 }
 
 void QCefWidgetInternal::closeBrowser()
@@ -729,7 +831,7 @@ void DispatchPrismEvent(const char *eventName, const char *jsonString)
 	DispatchJSEvent(event, json);
 }
 
-struct QCefInternal : QCef {
+struct QCefInternal : PLSQCef {
 	virtual bool init_browser(void) override;
 	virtual bool initialized(void) override;
 	virtual bool wait_for_browser_init(void) override;
@@ -841,7 +943,7 @@ extern "C" EXPORT QCef *obs_browser_create_qcef(void)
 	return new QCefInternal();
 }
 
-#define BROWSER_PANEL_VERSION 2
+#define BROWSER_PANEL_VERSION 3
 
 extern "C" EXPORT int obs_browser_qcef_version_export(void)
 {

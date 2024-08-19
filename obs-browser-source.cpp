@@ -1,6 +1,6 @@
 /******************************************************************************
  Copyright (C) 2014 by John R. Bradley <jrb@turrettech.com>
- Copyright (C) 2018 by Hugh Bailey ("Jim") <jim@obsproject.com>
+ Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -20,7 +20,7 @@
 #include "browser-client.hpp"
 #include "browser-scheme.hpp"
 #include "wide-string.hpp"
-#include "json11/json11.hpp"
+#include <nlohmann/json.hpp>
 #include <util/threading.h>
 #include <QApplication>
 #include <util/dstr.h>
@@ -41,9 +41,10 @@
 #include <QJsonObject>
 #include "pls/pls-obs-api.h"
 #include "obs-frontend-api.h"
+//PRISM/Xiewei/20240204/#4365/add url log
+#include "base64/base64.hpp"
 
 using namespace std;
-using namespace json11;
 
 extern bool QueueCEFTask(std::function<void()> task);
 
@@ -94,6 +95,22 @@ BrowserSource::BrowserSource(obs_data_t *, obs_source_t *source_)
 	obs_hotkey_register_source(source, "ObsBrowser.Refresh",
 				   obs_module_text("RefreshNoCache"),
 				   refreshFunction, (void *)this);
+
+	auto jsEventFunction = [](void *p, calldata_t *calldata) {
+		const auto eventName = calldata_string(calldata, "eventName");
+		if (!eventName)
+			return;
+		auto jsonString = calldata_string(calldata, "jsonString");
+		if (!jsonString)
+			jsonString = "null";
+		DispatchJSEvent(eventName, jsonString, (BrowserSource *)p);
+	};
+
+	proc_handler_t *ph = obs_source_get_proc_handler(source);
+	proc_handler_add(
+		ph,
+		"void javascript_event(string eventName, string jsonString)",
+		jsEventFunction, (void *)this);
 
 	/* defer update */
 	obs_source_update(source, nullptr);
@@ -207,6 +224,10 @@ void BrowserSource::ExecuteOnBrowser(BrowserFunc func, bool async)
 bool BrowserSource::CreateBrowser()
 {
 	return QueueCEFTask([this]() {
+		//PRISM/Renjinbo/20240111/stop queue create cef when obs exiting
+		if (pls_get_obs_exiting()) {
+			return;
+		}
 #ifdef ENABLE_BROWSER_SHARED_TEXTURE
 		if (hwaccel) {
 			obs_enter_graphics();
@@ -472,7 +493,8 @@ void BrowserSource::SetShowing(bool showing)
 							  PID_RENDERER, msg);
 			},
 			true);
-		Json json = Json::object{{"visible", showing}};
+		nlohmann::json json;
+		json["visible"] = showing;
 		DispatchJSEvent("obsSourceVisibleChanged", json.dump(), this);
 #if defined(BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED) && \
 	defined(ENABLE_BROWSER_SHARED_TEXTURE)
@@ -508,7 +530,8 @@ void BrowserSource::SetActive(bool active)
 						  msg);
 		},
 		true);
-	Json json = Json::object{{"active", active}};
+	nlohmann::json json;
+	json["active"] = active;
 	DispatchJSEvent("obsSourceActiveChanged", json.dump(), this);
 }
 
@@ -650,6 +673,16 @@ void BrowserSource::Update(obs_data_t *settings)
 						PET_VIEW);
 				},
 				true);
+			//PRISM/Xiewei/20240619/none/update new browser source size to interaction start
+			if (interaction_delegate)
+				interaction_delegate->ExecuteOnInteraction(
+					[this](INTERACTION_PTR interaction) {
+						interaction->SetInteractionInfo(
+							width, height,
+							cefBrowser);
+					},
+					true);
+			//PRISM/Xiewei/20240619/none/update new browser source size to interaction end
 			return;
 		}
 
@@ -665,6 +698,22 @@ void BrowserSource::Update(obs_data_t *settings)
 		css = n_css;
 		url = n_url;
 
+		//PRISM/Xiewei/20240204/#4365/add url log start
+		auto encodedUrl = base64_encode(url);
+		blog(LOG_INFO,
+		     "[obs-browser: '%s'] update settings: \n"
+		     "\turl: %s\n"
+		     "\tsize: %dx%d\n"
+		     "\tfps: %d\n"
+		     "\tfps_custom: %d\n"
+		     "\tshutdown_on_invisible: %d\n"
+		     "\treroute_audio: %d\n"
+		     "\twebpage_control_level: %d\n"
+		     "\trestart: %d",
+		     obs_source_get_name(source), encodedUrl.c_str(), width,
+		     height, fps, fps_custom, shutdown_on_invisible,
+		     reroute_audio, webpage_control_level, restart);
+		//PRISM/Xiewei/20240204/#4365/add url log end
 		obs_source_set_audio_active(source, reroute_audio);
 	}
 
@@ -864,16 +913,7 @@ void DispatchPrismEvent(obs_source_t *source, const char *eventName,
 //PRISM/Renjinbo/20230209/#/timer clock
 void BrowserSource::receiveWebMessage(const char *msg)
 {
-	auto doc = QJsonDocument::fromJson(msg);
-	if (!doc.isObject()) {
-		return;
-	}
-	auto root = doc.object();
-	auto type = root["module"].toString();
-
-	if ("timerClockWidget" == type) {
-		pls_source_cef_received_web_msg(source, msg);
-	}
+	pls_source_cef_received_web_msg(source, msg);
 }
 
 //PRISM/Zhangdewen/20200901/#for chat source initialization and send events to the web page

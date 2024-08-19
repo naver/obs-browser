@@ -30,26 +30,6 @@ struct QCefCookieManager {
 	virtual void CheckForCookie(const std::string &site,
 				    const std::string &cookie,
 				    cookie_exists_cb callback) = 0;
-
-	//PRISM/Zhangdewen/20230117/#/libbrowser
-	struct Cookie {
-		std::string name;
-		std::string value;
-		std::string domain;
-		std::string path;
-		bool isOnlyHttp = false;
-	};
-	virtual void ReadCookies(
-		const std::string &site,
-		const std::function<void(const std::list<Cookie> &)> &cookies,
-		bool isOnlyHttp) = 0;
-	virtual void
-	ReadAllCookies(const std::function<void(const std::list<Cookie> &)>
-			       &cookies) = 0;
-	virtual bool SetCookie(const std::string &url, const std::string &name,
-			       const std::string &value,
-			       const std::string &domain,
-			       const std::string &path, bool isOnlyHttp) = 0;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -64,20 +44,14 @@ public:
 	virtual void setURL(const std::string &url) = 0;
 	virtual void setStartupScript(const std::string &script) = 0;
 	virtual void allowAllPopups(bool allow) = 0;
-	virtual void reloadPage() = 0;
 	virtual void closeBrowser() = 0;
-	//PRISM/Zhangdewen/20230117/#/libbrowser
-	virtual void sendMsg(const std::wstring &type,
-			     const std::wstring &msg) = 0;
+	virtual void reloadPage() = 0;
+	virtual bool zoomPage(int direction) = 0;
+	virtual void executeJavaScript(const std::string &script) = 0;
 
 signals:
 	void titleChanged(const QString &title);
 	void urlChanged(const QString &url);
-	//PRISM/Zhangdewen/20230117/#/libbrowser
-	void loadEnded();
-	void msgRecevied(const QString &type, const QString &msg);
-	//PRISM/ChengBing/20230510/#add browserCLose signal,close loginView cef exception
-	void browserClosed();
 };
 
 /* ------------------------------------------------------------------------- */
@@ -92,17 +66,6 @@ struct QCef {
 	virtual QCefWidget *
 	create_widget(QWidget *parent, const std::string &url,
 		      QCefCookieManager *cookie_manager = nullptr) = 0;
-	//PRISM/Zhangdewen/20230117/#/libbrowser
-	virtual QCefWidget *
-	create_widget(QWidget *parent, const std::string &url,
-		      const std::string &script,
-		      QCefCookieManager *cookie_manager,
-		      const std::map<std::string, std::string> &headers =
-			      std::map<std::string, std::string>(),
-		      bool allowPopups = false,
-		      const QColor &initBkgColor = Qt::white,
-		      const std::string &css = std::string(),
-		      bool showAtLoadEnded = false) = 0;
 
 	virtual QCefCookieManager *
 	create_cookie_manager(const std::string &storage_path,

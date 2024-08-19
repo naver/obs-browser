@@ -2,6 +2,7 @@
 
 #include <QTimer>
 #include <QPointer>
+#include "PLSBrowserPanel.h"
 #include "browser-panel.hpp"
 #include "cef-headers.hpp"
 
@@ -24,7 +25,7 @@ extern std::vector<PopupWhitelistInfo> forced_popups;
 
 /* ------------------------------------------------------------------------- */
 
-class QCefWidgetInternal : public QCefWidget {
+class QCefWidgetInternal : public PLSQCefWidget {
 	Q_OBJECT
 
 public:
@@ -44,7 +45,6 @@ public:
 	std::string script;
 	CefRefPtr<CefRequestContext> rqc;
 	QTimer timer;
-    bool isCallClosed{false};
 #ifndef __APPLE__
 	QPointer<QWindow> window;
 	QPointer<QWidget> container;
@@ -54,6 +54,8 @@ public:
 	std::map<std::string, std::string> headers;
 	QColor bkgColor{Qt::white};
 	std::string css;
+	//PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget
+	std::atomic<bool> m_isDockWidget{false};
 
 	virtual void resizeEvent(QResizeEvent *event) override;
 	virtual void showEvent(QShowEvent *event) override;
@@ -64,6 +66,8 @@ public:
 	virtual void allowAllPopups(bool allow) override;
 	virtual void closeBrowser() override;
 	virtual void reloadPage() override;
+	virtual bool zoomPage(int direction) override;
+	virtual void executeJavaScript(const std::string &script) override;
 	//PRISM/Zhangdewen/20230308/#/libbrowser
 	virtual void sendMsg(const std::wstring &type,
 			     const std::wstring &msg) override;
@@ -78,4 +82,8 @@ private:
 
 public slots:
 	void Init();
+
+protected:
+	//PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget
+	virtual bool event(QEvent *event) override;
 };

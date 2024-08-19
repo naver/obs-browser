@@ -1,5 +1,3 @@
-This library including modifications would be used in https://github.com/naver/prism-live-studio
-
 # obs-browser
 
 obs-browser introduces a cross-platform Browser Source, powered by CEF ([Chromium Embedded Framework](https://bitbucket.org/chromiumembedded/cef/src/master/README.md)), to OBS Studio. A Browser Source allows the user to integrate web-based overlays into their scenes, with complete access to modern web APIs.
@@ -57,6 +55,9 @@ window.addEventListener('obsSceneChanged', function(event) {
 Descriptions for these events can be [found here](https://obsproject.com/docs/reference-frontend-api.html?highlight=paused#c.obs_frontend_event).
 
 * obsSceneChanged
+* obsSceneListChanged
+* obsTransitionChanged
+* obsTransitionListChanged
 * obsSourceVisibleChanged
 * obsSourceActiveChanged
 * obsStreamingStarting

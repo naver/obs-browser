@@ -17,7 +17,7 @@ struct BrowserSource;
 NS_ASSUME_NONNULL_BEGIN
 
 @interface BrowserOpenGLView
-	: NSOpenGLView <NSDraggingSource, NSDraggingDestination> {
+	: NSOpenGLView <NSDraggingDestination, NSPasteboardTypeOwner> {
 @private
 	NSTrackingArea *tracking_area_;
 	BrowserSource *browser_window_;

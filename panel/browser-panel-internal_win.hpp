@@ -2,7 +2,7 @@
 
 #include <QTimer>
 #include <QPointer>
-#include "browser-panel.hpp"
+#include "PLSBrowserPanel.h"
 #include "cef-headers.hpp"
 
 #include <vector>
@@ -69,6 +69,8 @@ public:
 	QColor m_initBkgColor{Qt::white};
 	std::string m_css;
 	bool m_showAtLoadEnded = false;
+	//PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget
+	std::atomic<bool> m_isDockWidget{false};
 
 	friend class QCefWidgetInternal;
 	friend class QCefBrowserClient;
@@ -84,6 +86,8 @@ public:
 
 	void setURL(const std::string &url);
 	void reloadPage();
+	bool zoomPage(int direction);
+	void executeJavaScript(const std::string &script);
 	void sendMsg(const std::wstring &type, const std::wstring &msg);
 	void resize(bool bImmediately, QSize size = QSize());
 
@@ -103,7 +107,7 @@ private slots:
 	void onLoadEnded();
 };
 
-class QCefWidgetInternal : public QCefWidget {
+class QCefWidgetInternal : public PLSQCefWidget {
 	Q_OBJECT
 
 public:
@@ -136,6 +140,8 @@ public:
 	virtual void allowAllPopups(bool allow) override;
 	virtual void closeBrowser() override;
 	virtual void reloadPage() override;
+	virtual bool zoomPage(int direction) override;
+	virtual void executeJavaScript(const std::string &script) override;
 	//PRISM/Zhangdewen/20230117/#/libbrowser
 	virtual void sendMsg(const std::wstring &type,
 			     const std::wstring &msg) override;

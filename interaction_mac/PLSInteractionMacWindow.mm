@@ -35,6 +35,8 @@ static void onPrismAppQuit(enum obs_frontend_event event, void *context)
 		}
 	}
 }
+#pragma clang diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 @implementation PLSInteractionMacWindow
 
@@ -175,7 +177,6 @@ static void onPrismAppQuit(enum obs_frontend_event event, void *context)
 		[self setWantsBestResolutionOpenGLSurface:YES];
 
 		[self resetDragDrop];
-
 		NSArray *types =
 			[NSArray arrayWithObjects:kCEFDragDummyPboardType,
 						  NSPasteboardTypeString,
@@ -283,9 +284,6 @@ static void onPrismAppQuit(enum obs_frontend_event event, void *context)
 		       relX:(int &)relX
 		       relY:(int &)relY
 {
-
-	float pixelRatio = [self getDeviceScaleFactor];
-
 	int mouseXscaled = (int)roundf(mouseX);
 	int mouseYscaled = (int)roundf(mouseY);
 
@@ -1072,3 +1070,24 @@ static void onPrismAppQuit(enum obs_frontend_event event, void *context)
 }
 
 @end
+#pragma GCC diagnostic pop
+
+//PRISM/Renjinbo/20231027/#2894/void * view is not nsview , is _NSViewLayoutAux, which can't constain removeFromSuperview method
+void cefViewRemoveFromSuperView(void *view)
+{
+	if (!*((bool *)view)) {
+		blog(LOG_ERROR,
+		     "cef view Failed to remove from superview. instance is not valid");
+
+		return;
+	}
+
+	NSView *appleView = (__bridge NSView *)view;
+	if (![appleView isKindOfClass:[NSView class]]) {
+		blog(LOG_ERROR,
+		     "cef view Failed to remove from superview. instanceClass:%s",
+		     [appleView className].UTF8String);
+		return;
+	}
+	[appleView removeFromSuperview];
+}
