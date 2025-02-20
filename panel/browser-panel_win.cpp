@@ -597,6 +597,8 @@ QCefWidgetInternal::QCefWidgetInternal(QWidget *parent, const std::string &url,
 	: PLSQCefWidget(parent)
 {
 	//PRISM/Zhangdewen/20230117/#/libbrowser
+	blog(LOG_INFO,
+	     "try to init cef browser from QCefWidgetInternal init method");
 	obs_browser_initialize();
 	setAttribute(Qt::WA_NativeWindow);
 	setFocusPolicy(Qt::ClickFocus);
@@ -869,6 +871,9 @@ bool QCefInternal::init_browser(void)
 	if (os_event_try(cef_started_event) == 0)
 		return true;
 
+	//PRISM/Renjinbo/20241122/#PRISM_PC_NELO-82/add log
+	blog(LOG_INFO,
+	     "try to init cef browser from QCefInternal init_browser method");
 	obs_browser_initialize();
 	return false;
 }

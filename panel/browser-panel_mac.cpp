@@ -58,10 +58,10 @@ static void cef_widgets_add(QCefWidgetInternal *impl, bool locked)
 	}
 }
 //PRISM/Zhangdewen/20230117/#/libbrowser
-static void cef_widgets_remove(QCefWidgetInternal *impl)
+static bool cef_widgets_remove(QCefWidgetInternal *impl)
 {
 	std::lock_guard guard(cef_widgets_mutex);
-	cef_widgets.erase(impl);
+	return cef_widgets.erase(impl) > 0;
 }
 //PRISM/Zhangdewen/20230117/#/libbrowser
 template<typename Callback> static void cef_widgets_foreach(Callback callback)
@@ -331,10 +331,9 @@ extern void cefViewRemoveFromSuperView(void *view);
 
 void QCefWidgetInternal::closeBrowser()
 {
-	if (!cef_widgets_is_valid(this)) {
+	if (!cef_widgets_remove(this)) {
 		return;
 	}
-	cef_widgets_remove(this);
 	CefRefPtr<CefBrowser> browser = cefBrowser;
 	if (!!browser) {
 		auto destroyBrowser = [](CefRefPtr<CefBrowser> cefBrowser) {
@@ -376,6 +375,8 @@ void QCefWidgetInternal::closeBrowser()
 #elif __APPLE__
 		// felt hacky, might delete later
 		void *view = (id)cefBrowser->GetHost()->GetWindowHandle();
+		blog(LOG_INFO, "cef close browser: internal:%p handle:%p", this,
+		     view);
 		cefViewRemoveFromSuperView(view);
 #endif
 

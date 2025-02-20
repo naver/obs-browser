@@ -1,3 +1,5 @@
+This library including modifications would be used in https://github.com/naver/prism-live-studio
+
 # obs-browser
 
 obs-browser introduces a cross-platform Browser Source, powered by CEF ([Chromium Embedded Framework](https://bitbucket.org/chromiumembedded/cef/src/master/README.md)), to OBS Studio. A Browser Source allows the user to integrate web-based overlays into their scenes, with complete access to modern web APIs.
