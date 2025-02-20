@@ -142,8 +142,11 @@ static void ActuallyCloseBrowser(CefRefPtr<CefBrowser> cefBrowser)
          * http://magpcss.org/ceforum/viewtopic.php?f=6&t=12079
          * https://bitbucket.org/chromiumembedded/cef/issues/1363/washidden-api-got-broken-on-branch-2062)
          */
+	blog(LOG_INFO, "%p - %s, Step 1", bc, __FUNCTION__);
 	cefBrowser->GetHost()->WasHidden(true);
+	blog(LOG_INFO, "%p - %s, Step 2", bc, __FUNCTION__);
 	cefBrowser->GetHost()->CloseBrowser(true);
+	blog(LOG_INFO, "%p - %s, Step 3", bc, __FUNCTION__);
 }
 
 //PRISM/Renjinbo/20230518/shutdown will crash when have privatewebsource
@@ -162,11 +165,16 @@ static void onPrismAppQuit_BrowserSource(enum obs_frontend_event event,
 }
 BrowserSource::~BrowserSource()
 {
+	blog(LOG_INFO, "%p - %s, Step 1", this, __FUNCTION__);
 	//PRISM/Renjinbo/20230518/shutdown will crash when have privatewebsource
 	if (GetBrowser()) {
+		blog(LOG_INFO, "%p - %s, Step 2", this, __FUNCTION__);
 		ActuallyCloseBrowser(GetBrowser());
+		blog(LOG_INFO, "%p - %s, Step 3", this, __FUNCTION__);
 		SetBrowser(nullptr);
+		blog(LOG_INFO, "%p - %s, Step 4", this, __FUNCTION__);
 	}
+	blog(LOG_INFO, "%p - %s, Step 5", this, __FUNCTION__);
 }
 
 void BrowserSource::Destroy()

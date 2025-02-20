@@ -486,6 +486,9 @@ static void BrowserManagerThread(void)
 extern "C" EXPORT void obs_browser_initialize(void)
 {
 	if (!os_atomic_set_bool(&manager_initialized, true)) {
+		//PRISM/Renjinbo/20241122/#PRISM_PC_NELO-82/add log
+		blog(LOG_INFO,
+		     "try to init cef browser with create loop thread.");
 #ifdef ENABLE_BROWSER_QT_LOOP
 		BrowserInit();
 #else
@@ -508,6 +511,8 @@ void RegisterBrowserSource()
 
 	info.get_name = [](void *) { return obs_module_text("BrowserSource"); };
 	info.create = [](obs_data_t *settings, obs_source_t *source) -> void * {
+		//PRISM/Renjinbo/20241122/#PRISM_PC_NELO-82/add log
+		blog(LOG_INFO, "try to init cef browser from source create.");
 		obs_browser_initialize();
 		return new BrowserSource(settings, source);
 	};
