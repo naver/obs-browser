@@ -55,8 +55,8 @@ void ExtractUnderlines(NSAttributedString *string,
 #pragma clang diagnostic pop
 			}
 			cef_composition_underline_t line = {
-				{static_cast<int>(range.location),
-				 static_cast<int>(NSMaxRange(range))},
+				{static_cast<uint32_t>(range.location),
+				 static_cast<uint32_t>(NSMaxRange(range))},
 				color,
 				0,
 				[style intValue] > 1};
@@ -129,8 +129,8 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 		textToBeInserted_.append([im_text UTF8String]);
 	} else {
 		cef_range_t range = {
-			static_cast<int>(replacementRange.location),
-			static_cast<int>(NSMaxRange(replacementRange))};
+			static_cast<uint32_t>(replacementRange.location),
+			static_cast<uint32_t>(NSMaxRange(replacementRange))};
 		browser_->GetHost()->ImeCommitText([im_text UTF8String], range,
 						   0);
 	}
@@ -168,7 +168,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 	} else {
 		// Use a thin black underline by default.
 		cef_composition_underline_t line = {
-			{0, length}, ColorBLACK, 0, false};
+			{0, static_cast<uint32_t>(length)}, ColorBLACK, 0, false};
 		underlines_.push_back(line);
 	}
 
@@ -179,8 +179,8 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 	// ongoing composition when we send empty text.
 	if (handlingKeyDown_) {
 		setMarkedTextReplacementRange_ = {
-			static_cast<int>(replacementRange.location),
-			static_cast<int>(NSMaxRange(replacementRange))};
+			static_cast<uint32_t>(replacementRange.location),
+			static_cast<uint32_t>(NSMaxRange(replacementRange))};
 	} else if (!handlingKeyDown_) {
 		CefRange replacement_range((int)replacementRange.location,
 					   (int)NSMaxRange(replacementRange));

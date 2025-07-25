@@ -28,6 +28,7 @@
 #include <thread>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <obs-websocket-api.h>
 
 #include "obs-browser-source.hpp"
 #include "browser-scheme.hpp"
@@ -35,7 +36,6 @@
 #include "browser-version.h"
 #include "pls-frontend-api.h"
 
-#include "obs-websocket-api/obs-websocket-api.h"
 #include "cef-headers.hpp"
 //PRISM/Xiewei/20230202/for web browser interaction
 #include <pls/pls-source.h>
@@ -48,6 +48,10 @@
 #include "signal-restore.hpp"
 #endif
 
+#ifdef ENABLE_WAYLAND
+#include <obs-nix-platform.h>
+#endif
+
 #ifdef ENABLE_BROWSER_QT_LOOP
 #include <QApplication>
 #include <QThread>
@@ -58,6 +62,8 @@
 #include <pls/pls-obs-api.h>
 //PRISM/Renjinbo/20240620/#/add debug port to debug alll cef client
 #include <QSettings>
+#include <filesystem>
+#include "pls/pls-base.h"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-browser", "en-US")
@@ -71,6 +77,8 @@ using namespace std;
 static thread manager_thread;
 static bool manager_initialized = false;
 os_event_t *cef_started_event = nullptr;
+//PRISM/Zhangdewen/20240122/PRISM_PC-2212 can't exit.
+static bool manager_destroyed = false;
 
 #if defined(_WIN32)
 static int adapterCount = 0;
@@ -98,8 +106,7 @@ public:
 		/* you have to put the tasks on the Qt event queue after this
 		 * call otherwise the CEF message pump may stop functioning
 		 * correctly, it's only supposed to take 10ms max */
-		QMetaObject::invokeMethod(&messageObject, "ExecuteTask",
-					  Qt::QueuedConnection,
+		QMetaObject::invokeMethod(&messageObject, "ExecuteTask", Qt::QueuedConnection,
 					  Q_ARG(MessageTask, task));
 #else
 		task();
@@ -113,7 +120,8 @@ bool QueueCEFTask(std::function<void()> task)
 {
 	//PRISM/Zhangdewen/20230117/#/libbrowser
 	CefRefPtr<BrowserTask> t(new BrowserTask(task));
-	while (!CefPostTask(TID_UI, t))
+	//PRISM/Zhangdewen/20240122/PRISM_PC-2212 can't exit.
+	while ((!manager_destroyed) && (!CefPostTask(TID_UI, t)))
 		os_sleep_ms(5);
 	return true;
 }
@@ -123,13 +131,9 @@ static void addWebRemoteDebugPort(CefSettings &settings)
 {
 	int webDebugPort = 0;
 #ifdef _WIN32
-	webDebugPort = QSettings("NAVER Corporation", "Prism Live Studio")
-			       .value("WebPort", 0)
-			       .toInt();
+	webDebugPort = QSettings("NAVER Corporation", "Prism Live Studio").value("WebPort", 0).toInt();
 #elif defined(__APPLE__)
-	webDebugPort = QSettings("prismlive", "prismlivestudio")
-			       .value("WebPort", 0)
-			       .toInt();
+	webDebugPort = QSettings("prismlive", "prismlivestudio").value("WebPort", 0).toInt();
 #endif
 	if (webDebugPort > 0) {
 		settings.remote_debugging_port = webDebugPort;
@@ -148,8 +152,7 @@ overflow: hidden; \
 static void browser_source_get_defaults(obs_data_t *settings)
 {
 	//PRISM/Xiewei/20221226/obs upgrade: cef interaction
-	obs_data_set_default_string(settings, "url",
-				    obs_module_text("DefaultURL"));
+	obs_data_set_default_string(settings, "url", obs_module_text("DefaultURL"));
 	obs_data_set_default_int(settings, "width", 800);
 	obs_data_set_default_int(settings, "height", 600);
 	obs_data_set_default_int(settings, "fps", 30);
@@ -160,14 +163,12 @@ static void browser_source_get_defaults(obs_data_t *settings)
 #endif
 	obs_data_set_default_bool(settings, "shutdown", false);
 	obs_data_set_default_bool(settings, "restart_when_active", false);
-	obs_data_set_default_int(settings, "webpage_control_level",
-				 (int)DEFAULT_CONTROL_LEVEL);
+	obs_data_set_default_int(settings, "webpage_control_level", (int)DEFAULT_CONTROL_LEVEL);
 	obs_data_set_default_string(settings, "css", default_css);
 	obs_data_set_default_bool(settings, "reroute_audio", false);
 }
 
-static bool is_local_file_modified(obs_properties_t *props, obs_property_t *,
-				   obs_data_t *settings)
+static bool is_local_file_modified(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
 {
 	bool enabled = obs_data_get_bool(settings, "is_local_file");
 	obs_property_t *url = obs_properties_get(props, "url");
@@ -178,8 +179,7 @@ static bool is_local_file_modified(obs_properties_t *props, obs_property_t *,
 	return true;
 }
 
-static bool is_fps_custom(obs_properties_t *props, obs_property_t *,
-			  obs_data_t *settings)
+static bool is_fps_custom(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
 {
 	bool enabled = obs_data_get_bool(settings, "fps_custom");
 	obs_property_t *fps = obs_properties_get(props, "fps");
@@ -195,8 +195,7 @@ static obs_properties_t *browser_source_get_properties(void *data)
 	DStr path;
 
 	obs_properties_set_flags(props, OBS_PROPERTIES_DEFER_UPDATE);
-	obs_property_t *prop = obs_properties_add_bool(
-		props, "is_local_file", obs_module_text("LocalFile"));
+	obs_property_t *prop = obs_properties_add_bool(props, "is_local_file", obs_module_text("LocalFile"));
 
 	if (bs && !bs->url.empty()) {
 		const char *slash;
@@ -209,22 +208,15 @@ static obs_properties_t *browser_source_get_properties(void *data)
 	}
 
 	obs_property_set_modified_callback(prop, is_local_file_modified);
-	obs_properties_add_path(props, "local_file",
-				obs_module_text("LocalFile"), OBS_PATH_FILE,
-				"*.*", path->array);
-	obs_properties_add_text(props, "url", obs_module_text("URL"),
-				OBS_TEXT_DEFAULT);
+	obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, "*.*", path->array);
+	obs_properties_add_text(props, "url", obs_module_text("URL"), OBS_TEXT_DEFAULT);
 
-	obs_properties_add_int(props, "width", obs_module_text("Width"), 1,
-			       8192, 1);
-	obs_properties_add_int(props, "height", obs_module_text("Height"), 1,
-			       8192, 1);
+	obs_properties_add_int(props, "width", obs_module_text("Width"), 1, 8192, 1);
+	obs_properties_add_int(props, "height", obs_module_text("Height"), 1, 8192, 1);
 
-	obs_properties_add_bool(props, "reroute_audio",
-				obs_module_text("RerouteAudio"));
+	obs_properties_add_bool(props, "reroute_audio", obs_module_text("RerouteAudio"));
 
-	obs_property_t *fps_set = obs_properties_add_bool(
-		props, "fps_custom", obs_module_text("CustomFrameRate"));
+	obs_property_t *fps_set = obs_properties_add_bool(props, "fps_custom", obs_module_text("CustomFrameRate"));
 	obs_property_set_modified_callback(fps_set, is_fps_custom);
 
 #ifndef ENABLE_BROWSER_SHARED_TEXTURE
@@ -233,48 +225,33 @@ static obs_properties_t *browser_source_get_properties(void *data)
 
 	obs_properties_add_int(props, "fps", obs_module_text("FPS"), 1, 60, 1);
 
-	obs_property_t *p = obs_properties_add_text(
-		props, "css", obs_module_text("CSS"), OBS_TEXT_MULTILINE);
+	obs_property_t *p = obs_properties_add_text(props, "css", obs_module_text("CSS"), OBS_TEXT_MULTILINE);
 	obs_property_text_set_monospace(p, true);
-	obs_properties_add_bool(props, "shutdown",
-				obs_module_text("ShutdownSourceNotVisible"));
-	obs_properties_add_bool(props, "restart_when_active",
-				obs_module_text("RefreshBrowserActive"));
+	obs_properties_add_bool(props, "shutdown", obs_module_text("ShutdownSourceNotVisible"));
+	obs_properties_add_bool(props, "restart_when_active", obs_module_text("RefreshBrowserActive"));
 
-	obs_property_t *controlLevel = obs_properties_add_list(
-		props, "webpage_control_level",
-		obs_module_text("WebpageControlLevel"), OBS_COMBO_TYPE_LIST,
-		OBS_COMBO_FORMAT_INT);
+	obs_property_t *controlLevel = obs_properties_add_list(props, "webpage_control_level",
+							       obs_module_text("WebpageControlLevel"),
+							       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 
-	obs_property_list_add_int(
-		controlLevel, obs_module_text("WebpageControlLevel.Level.None"),
-		(int)ControlLevel::None);
-	obs_property_list_add_int(
-		controlLevel,
-		obs_module_text("WebpageControlLevel.Level.ReadObs"),
-		(int)ControlLevel::ReadObs);
-	obs_property_list_add_int(
-		controlLevel,
-		obs_module_text("WebpageControlLevel.Level.ReadUser"),
-		(int)ControlLevel::ReadUser);
-	obs_property_list_add_int(
-		controlLevel,
-		obs_module_text("WebpageControlLevel.Level.Basic"),
-		(int)ControlLevel::Basic);
-	obs_property_list_add_int(
-		controlLevel,
-		obs_module_text("WebpageControlLevel.Level.Advanced"),
-		(int)ControlLevel::Advanced);
-	obs_property_list_add_int(
-		controlLevel, obs_module_text("WebpageControlLevel.Level.All"),
-		(int)ControlLevel::All);
+	obs_property_list_add_int(controlLevel, obs_module_text("WebpageControlLevel.Level.None"),
+				  (int)ControlLevel::None);
+	obs_property_list_add_int(controlLevel, obs_module_text("WebpageControlLevel.Level.ReadObs"),
+				  (int)ControlLevel::ReadObs);
+	obs_property_list_add_int(controlLevel, obs_module_text("WebpageControlLevel.Level.ReadUser"),
+				  (int)ControlLevel::ReadUser);
+	obs_property_list_add_int(controlLevel, obs_module_text("WebpageControlLevel.Level.Basic"),
+				  (int)ControlLevel::Basic);
+	obs_property_list_add_int(controlLevel, obs_module_text("WebpageControlLevel.Level.Advanced"),
+				  (int)ControlLevel::Advanced);
+	obs_property_list_add_int(controlLevel, obs_module_text("WebpageControlLevel.Level.All"),
+				  (int)ControlLevel::All);
 
-	obs_properties_add_button(
-		props, "refreshnocache", obs_module_text("RefreshNoCache"),
-		[](obs_properties_t *, obs_property_t *, void *data) {
-			static_cast<BrowserSource *>(data)->Refresh();
-			return false;
-		});
+	obs_properties_add_button(props, "refreshnocache", obs_module_text("RefreshNoCache"),
+				  [](obs_properties_t *, obs_property_t *, void *data) {
+					  static_cast<BrowserSource *>(data)->Refresh();
+					  return false;
+				  });
 	return props;
 }
 
@@ -306,11 +283,8 @@ static obs_missing_files_t *browser_source_missingfiles(void *data)
 
 		if (enabled && strcmp(path, "") != 0) {
 			if (!os_file_exists(path)) {
-				obs_missing_file_t *file =
-					obs_missing_file_create(
-						path, missing_file_callback,
-						OBS_MISSING_FILE_SOURCE,
-						bs->source, NULL);
+				obs_missing_file_t *file = obs_missing_file_create(
+					path, missing_file_callback, OBS_MISSING_FILE_SOURCE, bs->source, NULL);
 
 				obs_missing_files_add_file(files, file);
 			}
@@ -321,7 +295,7 @@ static obs_missing_files_t *browser_source_missingfiles(void *data)
 }
 
 static CefRefPtr<BrowserApp> app;
-
+static std::wstring getCefLogFile();
 static void BrowserInit(void)
 {
 	string path = obs_get_module_binary_path(obs_current_module());
@@ -341,10 +315,18 @@ static void BrowserInit(void)
 	os_mkdir(conf_path);
 
 	CefSettings settings;
-	settings.log_severity = LOGSEVERITY_DISABLE;
-	BPtr<char> log_path = obs_module_config_path("debug.log");
-	BPtr<char> log_path_abs = os_get_abs_path_ptr(log_path);
-	CefString(&settings.log_file) = log_path_abs;
+
+	//PRISM/Renjinbo/20250312/#/output cef raw log to file and upload to nelo
+	settings.log_severity = LOGSEVERITY_WARNING;
+	auto logFile = getCefLogFile();
+	CefString(&settings.log_file) = logFile;
+	char *logFile_utf8 = NULL;
+	os_wcs_to_utf8_ptr(logFile.c_str(), 0, &logFile_utf8);
+	if (logFile_utf8 != NULL) {
+		base_add_global_field_cn("cefLogFile", logFile_utf8);
+		bfree(logFile_utf8);
+	}
+
 	settings.windowless_rendering_enabled = true;
 	settings.no_sandbox = true;
 
@@ -360,19 +342,15 @@ static void BrowserInit(void)
 	 * browser sources are coming from OBS. */
 	std::stringstream prod_ver;
 	prod_ver << "Chrome/";
-	prod_ver << std::to_string(cef_version_info(4)) << "."
-		 << std::to_string(cef_version_info(5)) << "."
-		 << std::to_string(cef_version_info(6)) << "."
-		 << std::to_string(cef_version_info(7));
+	prod_ver << std::to_string(cef_version_info(4)) << "." << std::to_string(cef_version_info(5)) << "."
+		 << std::to_string(cef_version_info(6)) << "." << std::to_string(cef_version_info(7));
 	prod_ver << " OBS/";
-	prod_ver << std::to_string(obs_maj) << "." << std::to_string(obs_min)
-		 << "." << std::to_string(obs_pat);
+	prod_ver << std::to_string(obs_maj) << "." << std::to_string(obs_min) << "." << std::to_string(obs_pat);
 
 	//PRISM/Zhangdewen/20230117/#/modify user agent
 	//PRISM/Chengbing/20231108/#/prism version
-	prod_ver << " NAVER(pc; prism; prism-pc; " << pls_prism_version_major()
-		 << "." << pls_prism_version_minor() << "."
-		 << pls_prism_version_patch() << ";)";
+	prod_ver << " NAVER(pc; prism; prism-pc; " << pls_prism_version_major() << "." << pls_prism_version_minor()
+		 << "." << pls_prism_version_patch() << ";)";
 
 #if CHROME_VERSION_BUILD >= 4472
 	CefString(&settings.user_agent_product) = prod_ver.str();
@@ -405,12 +383,13 @@ static void BrowserInit(void)
 		accepted_languages = "en-US,en,ko-KR,ko";
 	}
 	//PRISM/Renjinbo/20230124/#2103/right menu local
-	CefString(&settings.locale) =
-		obs_locale.substr(0, obs_locale.find_last_of('-'));
+	CefString(&settings.locale) = obs_locale.substr(0, obs_locale.find_last_of('-'));
 
 	BPtr<char> conf_path_abs = os_get_abs_path_ptr(conf_path);
 	CefString(&settings.accept_language_list) = accepted_languages;
+#if CHROME_VERSION_BUILD <= 6533
 	settings.persist_user_preferences = 1;
+#endif
 	CefString(&settings.cache_path) = conf_path_abs;
 #if !defined(__APPLE__) || defined(ENABLE_BROWSER_LEGACY)
 	char *abs_path = os_get_abs_path_ptr(path.c_str());
@@ -428,7 +407,11 @@ static void BrowserInit(void)
 	}
 #endif
 
+#if defined(__APPLE__) || defined(_WIN32) || !defined(ENABLE_WAYLAND)
 	app = new BrowserApp(tex_sharing_avail);
+#else
+	app = new BrowserApp(tex_sharing_avail, obs_get_nix_platform() == OBS_NIX_PLATFORM_WAYLAND);
+#endif
 
 #ifdef _WIN32
 	CefExecuteProcess(args, app, nullptr);
@@ -436,10 +419,10 @@ static void BrowserInit(void)
 
 #if !defined(_WIN32)
 	BackupSignalHandlers();
-	CefInitialize(args, settings, app, nullptr);
+	bool success = CefInitialize(args, settings, app, nullptr);
 	RestoreSignalHandlers();
 #elif (CHROME_VERSION_BUILD > 3770)
-	CefInitialize(args, settings, app, nullptr);
+	bool success = CefInitialize(args, settings, app, nullptr);
 #else
 	/* Massive (but amazing) hack to prevent chromium from modifying our
 	 * process tokens and permissions, which caused us problems with winrt,
@@ -448,14 +431,18 @@ static void BrowserInit(void)
 	 * we'll just switch back to the static library but I doubt we'll need
 	 * to. */
 	uintptr_t zeroed_memory_lol[32] = {};
-	CefInitialize(args, settings, app, zeroed_memory_lol);
+	bool success = CefInitialize(args, settings, app, zeroed_memory_lol);
 #endif
+
+	if (!success) {
+		blog(LOG_ERROR, "[obs-browser]: CEF failed to initialize. Exit code: %d", CefGetExitCode());
+		return;
+	}
 
 #if !ENABLE_LOCAL_FILE_URL_SCHEME
 	/* Register http://absolute/ scheme handler for older
 	 * CEF builds which do not support file:// URLs */
-	CefRegisterSchemeHandlerFactory("http", "absolute",
-					new BrowserSchemeHandlerFactory());
+	CefRegisterSchemeHandlerFactory("http", "absolute", new BrowserSchemeHandlerFactory());
 #endif
 	os_event_signal(cef_started_event);
 }
@@ -479,7 +466,11 @@ static void BrowserManagerThread(void)
 {
 	BrowserInit();
 	CefRunMessageLoop();
+	//PRISM/Renjinbo/20250306/#PRISM_PC_NELO-196/add track log
+	blog(LOG_INFO, "[obs-browser]: browser manager thread exit runloop");
 	BrowserShutdown();
+	//PRISM/Renjinbo/20250306/#PRISM_PC_NELO-196/add track log
+	blog(LOG_INFO, "[obs-browser]: browser manager thread shutdown complete");
 }
 #endif
 
@@ -487,8 +478,7 @@ extern "C" EXPORT void obs_browser_initialize(void)
 {
 	if (!os_atomic_set_bool(&manager_initialized, true)) {
 		//PRISM/Renjinbo/20241122/#PRISM_PC_NELO-82/add log
-		blog(LOG_INFO,
-		     "try to init cef browser with create loop thread.");
+		blog(LOG_INFO, "try to init cef browser with create loop thread.");
 #ifdef ENABLE_BROWSER_QT_LOOP
 		BrowserInit();
 #else
@@ -502,14 +492,15 @@ void RegisterBrowserSource()
 	struct obs_source_info info = {};
 	info.id = "browser_source";
 	info.type = OBS_SOURCE_TYPE_INPUT;
-	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO |
-			    OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_INTERACTION |
+	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_INTERACTION |
 			    OBS_SOURCE_DO_NOT_DUPLICATE | OBS_SOURCE_SRGB;
 	info.get_properties = browser_source_get_properties;
 	info.get_defaults = browser_source_get_defaults;
 	info.icon_type = OBS_ICON_TYPE_BROWSER;
 
-	info.get_name = [](void *) { return obs_module_text("BrowserSource"); };
+	info.get_name = [](void *) {
+		return obs_module_text("BrowserSource");
+	};
 	info.create = [](obs_data_t *settings, obs_source_t *source) -> void * {
 		//PRISM/Renjinbo/20241122/#PRISM_PC_NELO-82/add log
 		blog(LOG_INFO, "try to init cef browser from source create.");
@@ -536,38 +527,28 @@ void RegisterBrowserSource()
 		static_cast<BrowserSource *>(data)->Render();
 	};
 #if CHROME_VERSION_BUILD < 4103
-	info.audio_mix = [](void *data, uint64_t *ts_out,
-			    struct audio_output_data *audio_output,
-			    size_t channels, size_t sample_rate) {
-		return static_cast<BrowserSource *>(data)->AudioMix(
-			ts_out, audio_output, channels, sample_rate);
+	info.audio_mix = [](void *data, uint64_t *ts_out, struct audio_output_data *audio_output, size_t channels,
+			    size_t sample_rate) {
+		return static_cast<BrowserSource *>(data)->AudioMix(ts_out, audio_output, channels, sample_rate);
 	};
-	info.enum_active_sources = [](void *data, obs_source_enum_proc_t cb,
-				      void *param) {
+	info.enum_active_sources = [](void *data, obs_source_enum_proc_t cb, void *param) {
 		static_cast<BrowserSource *>(data)->EnumAudioStreams(cb, param);
 	};
 #endif
-	info.mouse_click = [](void *data, const struct obs_mouse_event *event,
-			      int32_t type, bool mouse_up,
+	info.mouse_click = [](void *data, const struct obs_mouse_event *event, int32_t type, bool mouse_up,
 			      uint32_t click_count) {
-		static_cast<BrowserSource *>(data)->SendMouseClick(
-			event, type, mouse_up, click_count);
+		static_cast<BrowserSource *>(data)->SendMouseClick(event, type, mouse_up, click_count);
 	};
-	info.mouse_move = [](void *data, const struct obs_mouse_event *event,
-			     bool mouse_leave) {
-		static_cast<BrowserSource *>(data)->SendMouseMove(event,
-								  mouse_leave);
+	info.mouse_move = [](void *data, const struct obs_mouse_event *event, bool mouse_leave) {
+		static_cast<BrowserSource *>(data)->SendMouseMove(event, mouse_leave);
 	};
-	info.mouse_wheel = [](void *data, const struct obs_mouse_event *event,
-			      int x_delta, int y_delta) {
-		static_cast<BrowserSource *>(data)->SendMouseWheel(
-			event, x_delta, y_delta);
+	info.mouse_wheel = [](void *data, const struct obs_mouse_event *event, int x_delta, int y_delta) {
+		static_cast<BrowserSource *>(data)->SendMouseWheel(event, x_delta, y_delta);
 	};
 	info.focus = [](void *data, bool focus) {
 		static_cast<BrowserSource *>(data)->SendFocus(focus);
 	};
-	info.key_click = [](void *data, const struct obs_key_event *event,
-			    bool key_up) {
+	info.key_click = [](void *data, const struct obs_key_event *event, bool key_up) {
 		static_cast<BrowserSource *>(data)->SendKeyClick(event, key_up);
 	};
 	info.show = [](void *data) {
@@ -591,12 +572,9 @@ void RegisterBrowserSource()
 	pls_info.get_private_data = InteractionDelegate::GetBrowserData;
 	pls_info.set_private_data = InteractionDelegate::SetBrowserData;
 	//PRISM/Zhangdewen/20230202/#/move from //PRISM/RenJinbo/20210603/#none/timer source feature
-	pls_info.cef_dispatch_js = [](void *data, const char *event_name,
-				      const char *json_data) {
-		if (data && event_name && *event_name && json_data &&
-		    *json_data) {
-			static_cast<BrowserSource *>(data)->dispatchJs(
-				event_name, json_data);
+	pls_info.cef_dispatch_js = [](void *data, const char *event_name, const char *json_data) {
+		if (data && event_name && *event_name && json_data && *json_data) {
+			static_cast<BrowserSource *>(data)->dispatchJs(event_name, json_data);
 		}
 	};
 
@@ -607,8 +585,7 @@ void RegisterBrowserSource()
 
 /* ========================================================================= */
 
-extern void DispatchJSEvent(std::string eventName, std::string jsonString,
-			    BrowserSource *browser = nullptr);
+extern void DispatchJSEvent(std::string eventName, std::string jsonString, BrowserSource *browser = nullptr);
 
 static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 {
@@ -676,8 +653,7 @@ static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 
 		nlohmann::json json = {{"name", name},
 				       {"width", obs_source_get_width(source)},
-				       {"height",
-					obs_source_get_height(source)}};
+				       {"height", obs_source_get_height(source)}};
 
 		DispatchJSEvent("obsSceneChanged", json.dump());
 		break;
@@ -697,8 +673,7 @@ static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 		break;
 	}
 	case OBS_FRONTEND_EVENT_TRANSITION_CHANGED: {
-		OBSSourceAutoRelease source =
-			obs_frontend_get_current_transition();
+		OBSSourceAutoRelease source = obs_frontend_get_current_transition();
 
 		if (!source)
 			break;
@@ -718,8 +693,7 @@ static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 		std::vector<const char *> transitions_vector;
 		for (size_t i = 0; i < list.sources.num; i++) {
 			obs_source_t *source = list.sources.array[i];
-			transitions_vector.push_back(
-				obs_source_get_name(source));
+			transitions_vector.push_back(obs_source_get_name(source));
 		}
 		nlohmann::json json = transitions_vector;
 		obs_frontend_source_list_free(&list);
@@ -767,8 +741,7 @@ static inline void EnumAdapterCount()
 
 #ifdef ENABLE_BROWSER_SHARED_TEXTURE
 #ifdef _WIN32
-static const wchar_t *blacklisted_devices[] = {
-	L"Intel", L"Microsoft", L"Radeon HD 8850M", L"Radeon HD 7660", nullptr};
+static const wchar_t *blacklisted_devices[] = {L"Intel", L"Microsoft", L"Radeon HD 8850M", L"Radeon HD 7660", nullptr};
 
 static inline bool is_intel(const std::wstring &str)
 {
@@ -808,8 +781,7 @@ static void check_hwaccel_support(void)
 //PRISM/ChengBing/20230425/#porting from PRISM 3.1.3
 extern void DispatchPrismEvent(const char *eventName, const char *jsonString);
 //PRISM/Zhangdewen/20200901/#for chat source
-extern void DispatchPrismEvent(obs_source_t *source, const char *eventName,
-			       const char *jsonString);
+extern void DispatchPrismEvent(obs_source_t *source, const char *eventName, const char *jsonString);
 bool obs_module_load(void)
 {
 	//PRISM/ChengBing/20230425/#porting from PRISM 3.1.3
@@ -833,9 +805,12 @@ bool obs_module_load(void)
 
 	os_event_init(&cef_started_event, OS_EVENT_TYPE_MANUAL);
 
-#ifdef _WIN32
+#if defined(_WIN32) && CHROME_VERSION_BUILD < 5615
 	/* CefEnableHighDPISupport doesn't do anything on OS other than Windows. Would also crash macOS at this point as CEF is not directly linked */
 	CefEnableHighDPISupport();
+#endif
+
+#ifdef _WIN32
 	EnumAdapterCount();
 #else
 #if defined(__APPLE__) && !defined(ENABLE_BROWSER_LEGACY)
@@ -846,10 +821,8 @@ bool obs_module_load(void)
 #endif
 #endif
 	blog(LOG_INFO, "[obs-browser]: Version %s", OBS_BROWSER_VERSION_STRING);
-	blog(LOG_INFO,
-	     "[obs-browser]: CEF Version %i.%i.%i.%i (runtime), %s (compiled)",
-	     cef_version_info(4), cef_version_info(5), cef_version_info(6),
-	     cef_version_info(7), CEF_VERSION);
+	blog(LOG_INFO, "[obs-browser]: CEF Version %i.%i.%i.%i (runtime), %s (compiled)", cef_version_info(4),
+	     cef_version_info(5), cef_version_info(6), cef_version_info(7), CEF_VERSION);
 
 	RegisterBrowserSource();
 	obs_frontend_add_event_callback(handle_obs_frontend_event, nullptr);
@@ -877,25 +850,19 @@ void obs_module_post_load(void)
 	if (!vendor)
 		return;
 
-	auto emit_event_request_cb = [](obs_data_t *request_data, obs_data_t *,
-					void *) {
-		const char *event_name =
-			obs_data_get_string(request_data, "event_name");
+	auto emit_event_request_cb = [](obs_data_t *request_data, obs_data_t *, void *) {
+		const char *event_name = obs_data_get_string(request_data, "event_name");
 		if (!event_name)
 			return;
 
-		OBSDataAutoRelease event_data =
-			obs_data_get_obj(request_data, "event_data");
-		const char *event_data_string =
-			event_data ? obs_data_get_json(event_data) : "{}";
+		OBSDataAutoRelease event_data = obs_data_get_obj(request_data, "event_data");
+		const char *event_data_string = event_data ? obs_data_get_json(event_data) : "{}";
 
 		DispatchJSEvent(event_name, event_data_string, nullptr);
 	};
 
-	if (!obs_websocket_vendor_register_request(
-		    vendor, "emit_event", emit_event_request_cb, nullptr))
-		blog(LOG_WARNING,
-		     "[obs-browser]: Failed to register obs-websocket request emit_event");
+	if (!obs_websocket_vendor_register_request(vendor, "emit_event", emit_event_request_cb, nullptr))
+		blog(LOG_WARNING, "[obs-browser]: Failed to register obs-websocket request emit_event");
 }
 
 void obs_module_unload(void)
@@ -911,17 +878,23 @@ void obs_module_unload(void)
 		     "[obs-browser]: obs_module_unload: wait browser close time:%d ms, is all browser close:%d",
 		     maxWaitMs, is_all_browers_close_done.load());
 	}
-
+	//PRISM/Renjinbo/20250306/#PRISM_PC_NELO-196/add track log
+	blog(LOG_INFO, "[obs-browser]: browser start to shutdown or close thread");
 #ifdef ENABLE_BROWSER_QT_LOOP
 	BrowserShutdown();
 #else
 	if (manager_thread.joinable()) {
-		while (!QueueCEFTask([]() { CefQuitMessageLoop(); }))
-			os_sleep_ms(5);
+		if (!QueueCEFTask([]() { CefQuitMessageLoop(); }))
+			blog(LOG_DEBUG, "[obs-browser]: Failed to post CefQuit task to loop");
 
 		manager_thread.join();
 	}
 #endif
+	//PRISM/Renjinbo/20250306/#PRISM_PC_NELO-196/add track log
+	blog(LOG_INFO, "[obs-browser]: browser succeed to shutdown or close thread");
+
+	//PRISM/Zhangdewen/20240122/PRISM_PC-2212 can't exit.
+	manager_destroyed = true;
 
 	os_event_destroy(cef_started_event);
 
@@ -932,4 +905,22 @@ void obs_module_unload(void)
 	InteractionViewWin::UnregisterClassName();
 	BrowserInteractionMainWin::UnregisterClassName();
 #endif
+}
+
+//PRISM/Renjinbo/20250312/#/output cef raw log to file and upload to nelo
+static std::wstring getCefLogFile()
+{
+	auto tempDir = std::filesystem::temp_directory_path();
+	std::filesystem::path cefDir = tempDir / "PRISMLiveStudio_cef";
+
+	//TODO: jimbo.ren change to filesystem to mkdir
+	char *str = NULL;
+	os_wcs_to_utf8_ptr(cefDir.generic_wstring().c_str(), 0, &str);
+	os_mkdir(str);
+	bfree(str);
+
+	char *uuid = os_generate_uuid();
+	auto logPath = cefDir / uuid;
+	bfree(uuid);
+	return logPath.generic_wstring();
 }

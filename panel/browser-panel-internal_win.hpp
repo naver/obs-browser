@@ -15,10 +15,7 @@ struct PopupWhitelistInfo {
 	std::string url;
 	QPointer<QObject> obj;
 
-	inline PopupWhitelistInfo(const std::string &url_, QObject *obj_)
-		: url(url_), obj(obj_)
-	{
-	}
+	inline PopupWhitelistInfo(const std::string &url_, QObject *obj_) : url(url_), obj(obj_) {}
 };
 
 extern std::mutex popup_whitelist_mutex;
@@ -36,8 +33,7 @@ class QCefWidgetInternal;
 
 //PRISM/Zhangdewen/20230117/#/libbrowser
 bool cef_widgets_is_valid(QCefWidgetImpl *impl);
-bool cef_widgets_sync_call(QCefWidgetImpl *impl,
-			   std::function<void(QCefWidgetImpl *)> call);
+bool cef_widgets_sync_call(QCefWidgetImpl *impl, std::function<void(QCefWidgetImpl *)> call);
 
 //PRISM/Zhangdewen/20230117/#/libbrowser
 class QCefWidgetImpl : public QWidget {
@@ -48,12 +44,9 @@ public:
 	using Headers = std::map<std::string, std::string>;
 
 public:
-	QCefWidgetImpl(QWidget *parent, const std::string &url,
-		       const std::string &script, Rqc rqc,
-		       const Headers &headers, bool allowPopups,
-		       QCefBrowserPopupDialog *popup,
-		       const QColor &initBkgColor, const std::string &css,
-		       bool showAtLoadEnded);
+	QCefWidgetImpl(QWidget *parent, const std::string &url, const std::string &script, Rqc rqc,
+		       const Headers &headers, bool allowPopups, QCefBrowserPopupDialog *popup,
+		       const QColor &initBkgColor, const std::string &css, bool showAtLoadEnded);
 	~QCefWidgetImpl();
 
 	CefRefPtr<CefBrowser> m_browser;
@@ -71,6 +64,8 @@ public:
 	bool m_showAtLoadEnded = false;
 	//PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget
 	std::atomic<bool> m_isDockWidget{false};
+	//PRISM/Renjinbo/20250306/#PRISM_PC_NELO-196/add track log
+	int restartCount = 0;
 
 	friend class QCefWidgetInternal;
 	friend class QCefBrowserClient;
@@ -81,8 +76,7 @@ private slots:
 
 public:
 	void paintEvent(QPaintEvent *event) override;
-	bool nativeEvent(const QByteArray &eventType, void *message,
-			 qintptr *result) override;
+	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 	void setURL(const std::string &url);
 	void reloadPage();
@@ -96,12 +90,14 @@ public:
 
 	void attachBrowser(CefRefPtr<CefBrowser> browser);
 	void detachBrowser();
+	void CloseSafely();
 
 signals:
 	void titleChanged(const QString &title);
 	void urlChanged(const QString &url);
 	void loadEnded();
 	void msgRecevied(const QString &type, const QString &msg);
+	void readyToClose();
 
 private slots:
 	void onLoadEnded();
@@ -111,20 +107,14 @@ class QCefWidgetInternal : public PLSQCefWidget {
 	Q_OBJECT
 
 public:
-	QCefWidgetInternal(QWidget *parent, const std::string &url,
-			   CefRefPtr<CefRequestContext> rqc,
+	QCefWidgetInternal(QWidget *parent, const std::string &url, CefRefPtr<CefRequestContext> rqc,
 			   //PRISM/Zhangdewen/20230117/#/libbrowser
-			   const std::string &script,
-			   const QCefWidgetImpl::Headers &headers,
-			   bool allowPopups, bool callInit,
-			   QCefBrowserPopupDialog *popup = nullptr,
-			   bool locked = false,
-			   const QColor &initBkgColor = Qt::white,
-			   const std::string &css = std::string(),
+			   const std::string &script, const QCefWidgetImpl::Headers &headers, bool allowPopups,
+			   bool callInit, QCefBrowserPopupDialog *popup = nullptr, bool locked = false,
+			   const QColor &initBkgColor = Qt::white, const std::string &css = std::string(),
 			   bool showAtLoadEnded = false);
 	//PRISM/Zhangdewen/20230117/#/libbrowser
-	QCefWidgetInternal(QCefBrowserPopupDialog *parent,
-			   QCefWidgetImpl *checkImpl, bool locked = false);
+	QCefWidgetInternal(QCefBrowserPopupDialog *parent, QCefWidgetImpl *checkImpl, bool locked = false);
 	~QCefWidgetInternal();
 
 	//PRISM/Zhangdewen/20230117/#/libbrowser
@@ -143,8 +133,7 @@ public:
 	virtual bool zoomPage(int direction) override;
 	virtual void executeJavaScript(const std::string &script) override;
 	//PRISM/Zhangdewen/20230117/#/libbrowser
-	virtual void sendMsg(const std::wstring &type,
-			     const std::wstring &msg) override;
+	virtual void sendMsg(const std::wstring &type, const std::wstring &msg) override;
 };
 
 //PRISM/Zhangdewen/20230117/#/libbrowser
@@ -152,14 +141,11 @@ class QCefBrowserPopupDialog : public QDialog {
 	Q_OBJECT
 
 private:
-	QCefBrowserPopupDialog(QCefWidgetImpl *checkImpl,
-			       QWidget *parent = nullptr, bool locked = false);
+	QCefBrowserPopupDialog(QCefWidgetImpl *checkImpl, QWidget *parent = nullptr, bool locked = false);
 	~QCefBrowserPopupDialog() override;
 
 public:
-	static QCefBrowserPopupDialog *create(CefWindowHandle &handle,
-					      QCefWidgetImpl *checkImpl,
-					      QWidget *parent,
+	static QCefBrowserPopupDialog *create(CefWindowHandle &handle, QCefWidgetImpl *checkImpl, QWidget *parent,
 					      bool locked = false);
 
 public:

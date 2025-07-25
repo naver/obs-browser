@@ -13,10 +13,7 @@ struct PopupWhitelistInfo {
 	std::string url;
 	QPointer<QObject> obj;
 
-	inline PopupWhitelistInfo(const std::string &url_, QObject *obj_)
-		: url(url_), obj(obj_)
-	{
-	}
+	inline PopupWhitelistInfo(const std::string &url_, QObject *obj_) : url(url_), obj(obj_) {}
 };
 
 extern std::mutex popup_whitelist_mutex;
@@ -29,14 +26,10 @@ class QCefWidgetInternal : public PLSQCefWidget {
 	Q_OBJECT
 
 public:
-	QCefWidgetInternal(
-		QWidget *parent, const std::string &url,
-		CefRefPtr<CefRequestContext> rqc,
-		//PRISM/Zhangdewen/20230308/#/libbrowser
-		const std::string &script = {},
-		const std::map<std::string, std::string> &headers = {},
-		bool allowPopups = false, const QColor &bkgColor = Qt::white,
-		const std::string &css = {});
+	QCefWidgetInternal(QWidget *parent, const std::string &url, CefRefPtr<CefRequestContext> rqc,
+			   //PRISM/Zhangdewen/20230308/#/libbrowser
+			   const std::string &script = {}, const std::map<std::string, std::string> &headers = {},
+			   bool allowPopups = false, const QColor &bkgColor = Qt::white, const std::string &css = {});
 
 	~QCefWidgetInternal();
 
@@ -69,9 +62,9 @@ public:
 	virtual bool zoomPage(int direction) override;
 	virtual void executeJavaScript(const std::string &script) override;
 	//PRISM/Zhangdewen/20230308/#/libbrowser
-	virtual void sendMsg(const std::wstring &type,
-			     const std::wstring &msg) override;
+	virtual void sendMsg(const std::wstring &type, const std::wstring &msg) override;
 
+	void CloseSafely();
 	void Resize();
 
 #ifdef __linux__
@@ -82,6 +75,9 @@ private:
 
 public slots:
 	void Init();
+
+signals:
+	void readyToClose();
 
 protected:
 	//PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget

@@ -73,4 +73,5 @@ private:
 	bool CreateDisplay(WindowHandle hWnd, int cx, int cy);
 	void ClearDisplay();
 	void closeWindowWithSource(BrowserSource *browser_source);
+	void showInteractionInMainThread(bool show);
 };

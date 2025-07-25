@@ -40,8 +40,7 @@ std::mutex popup_whitelist_mutex;
 std::vector<PopupWhitelistInfo> popup_whitelist;
 std::vector<PopupWhitelistInfo> forced_popups;
 
-static int zoomLvls[] = {25,  33,  50,  67,  75,  80,  90,  100,
-			 110, 125, 150, 175, 200, 250, 300, 400};
+static int zoomLvls[] = {25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400};
 
 //PRISM/Zhangdewen/20230117/#/libbrowser
 static std::recursive_mutex cef_widgets_mutex;
@@ -85,8 +84,7 @@ bool cef_widgets_is_valid(QCefWidgetInternal *impl)
 	return false;
 }
 //PRISM/Zhangdewen/20230117/#/libbrowser
-bool cef_widgets_sync_call(QCefWidgetInternal *impl,
-			   std::function<void(QCefWidgetInternal *)> call)
+bool cef_widgets_sync_call(QCefWidgetInternal *impl, std::function<void(QCefWidgetInternal *)> call)
 {
 	if (!impl) {
 		return false;
@@ -108,9 +106,9 @@ public:
 	std::string target;
 	bool cookie_found = false;
 
-	inline CookieCheck(QCefCookieManager::cookie_exists_cb callback_,
-			   const std::string target_)
-		: callback(callback_), target(target_)
+	inline CookieCheck(QCefCookieManager::cookie_exists_cb callback_, const std::string target_)
+		: callback(callback_),
+		  target(target_)
 	{
 	}
 
@@ -134,13 +132,10 @@ public:
 //PRISM/Zhangdewen/20230308/#/libbrowser
 class CookieRead : public CefCookieVisitor {
 public:
-	std::function<void(const std::list<PLSQCefCookieManager::Cookie> &)>
-		m_cookies_cb;
+	std::function<void(const std::list<PLSQCefCookieManager::Cookie> &)> m_cookies_cb;
 	std::list<PLSQCefCookieManager::Cookie> m_cookies;
 
-	inline CookieRead(const std::function<
-			  void(const std::list<PLSQCefCookieManager::Cookie> &)>
-				  &cookies_cb)
+	inline CookieRead(const std::function<void(const std::list<PLSQCefCookieManager::Cookie> &)> &cookies_cb)
 		: m_cookies_cb(cookies_cb)
 	{
 	}
@@ -150,10 +145,8 @@ public:
 	virtual bool Visit(const CefCookie &cookie, int, int, bool &) override
 	{
 		m_cookies.push_back(PLSQCefCookieManager::Cookie{
-			CefString(cookie.name.str).ToString(),
-			CefString(cookie.value.str).ToString(),
-			CefString(cookie.domain.str).ToString(),
-			CefString(cookie.path.str).ToString(),
+			CefString(cookie.name.str).ToString(), CefString(cookie.value.str).ToString(),
+			CefString(cookie.domain.str).ToString(), CefString(cookie.path.str).ToString(),
 			!!cookie.httponly});
 		return true;
 	}
@@ -165,8 +158,7 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 	CefRefPtr<CefCookieManager> cm;
 	CefRefPtr<CefRequestContext> rc;
 
-	QCefCookieManagerInternal(const std::string &storage_path,
-				  bool persist_session_cookies)
+	QCefCookieManagerInternal(const std::string &storage_path, bool persist_session_cookies)
 	{
 		if (os_event_try(cef_started_event) != 0)
 			throw "Browser thread not initialized";
@@ -178,33 +170,33 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 		BPtr<char> path = os_get_abs_path_ptr(rpath.Get());
 
 		CefRequestContextSettings settings;
+#if CHROME_VERSION_BUILD <= 6533
 		settings.persist_user_preferences = 1;
+#endif
 		CefString(&settings.cache_path) = path.Get();
-		rc = CefRequestContext::CreateContext(
-			settings, CefRefPtr<CefRequestContextHandler>());
+		rc = CefRequestContext::CreateContext(settings, CefRefPtr<CefRequestContextHandler>());
 		if (rc)
 			cm = rc->GetCookieManager(nullptr);
 
 		UNUSED_PARAMETER(persist_session_cookies);
 	}
 
-	virtual bool DeleteCookies(const std::string &url,
-				   const std::string &name) override
+	virtual bool DeleteCookies(const std::string &url, const std::string &name) override
 	{
 		return !!cm ? cm->DeleteCookies(url, name, nullptr) : false;
 	}
 
-	virtual bool SetStoragePath(const std::string &storage_path,
-				    bool persist_session_cookies) override
+	virtual bool SetStoragePath(const std::string &storage_path, bool persist_session_cookies) override
 	{
 		BPtr<char> rpath = obs_module_config_path(storage_path.c_str());
 		BPtr<char> path = os_get_abs_path_ptr(rpath.Get());
 
 		CefRequestContextSettings settings;
+#if CHROME_VERSION_BUILD <= 6533
 		settings.persist_user_preferences = 1;
+#endif
 		CefString(&settings.cache_path) = storage_path;
-		rc = CefRequestContext::CreateContext(
-			settings, CefRefPtr<CefRequestContextHandler>());
+		rc = CefRequestContext::CreateContext(settings, CefRefPtr<CefRequestContextHandler>());
 		if (rc)
 			cm = rc->GetCookieManager(nullptr);
 
@@ -212,13 +204,9 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 		return true;
 	}
 
-	virtual bool FlushStore() override
-	{
-		return !!cm ? cm->FlushStore(nullptr) : false;
-	}
+	virtual bool FlushStore() override { return !!cm ? cm->FlushStore(nullptr) : false; }
 
-	virtual void CheckForCookie(const std::string &site,
-				    const std::string &cookie,
+	virtual void CheckForCookie(const std::string &site, const std::string &cookie,
 				    cookie_exists_cb callback) override
 	{
 		if (!cm)
@@ -229,10 +217,8 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 	}
 
 	//PRISM/Zhangdewen/20230308/#/libbrowser
-	virtual void ReadCookies(
-		const std::string &site,
-		const std::function<void(const std::list<Cookie> &)> &cookies,
-		bool isOnlyHttp) override
+	virtual void ReadCookies(const std::string &site, const std::function<void(const std::list<Cookie> &)> &cookies,
+				 bool isOnlyHttp) override
 	{
 		if (!cm) {
 			cookies({});
@@ -243,9 +229,7 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 		cm->VisitUrlCookies(site, isOnlyHttp, c);
 	}
 	//PRISM/Zhangdewen/20230308/#/libbrowser
-	virtual void ReadAllCookies(
-		const std::function<void(const std::list<Cookie> &)> &cookies)
-		override
+	virtual void ReadAllCookies(const std::function<void(const std::list<Cookie> &)> &cookies) override
 	{
 		if (!cm) {
 			cookies({});
@@ -256,24 +240,17 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 		cm->VisitAllCookies(c);
 	}
 	//PRISM/Zhangdewen/20230308/#/libbrowser
-	virtual bool SetCookie(const std::string &url, const std::string &name,
-			       const std::string &value,
-			       const std::string &domain,
-			       const std::string &path,
-			       bool isOnlyHttp) override
+	virtual bool SetCookie(const std::string &url, const std::string &name, const std::string &value,
+			       const std::string &domain, const std::string &path, bool isOnlyHttp) override
 	{
 		if (!cm)
 			return false;
 
 		CefCookie cookie;
-		cef_string_utf8_to_utf16(name.c_str(), name.size(),
-					 &cookie.name);
-		cef_string_utf8_to_utf16(value.c_str(), value.size(),
-					 &cookie.value);
-		cef_string_utf8_to_utf16(domain.c_str(), domain.size(),
-					 &cookie.domain);
-		cef_string_utf8_to_utf16(path.c_str(), path.size(),
-					 &cookie.path);
+		cef_string_utf8_to_utf16(name.c_str(), name.size(), &cookie.name);
+		cef_string_utf8_to_utf16(value.c_str(), value.size(), &cookie.value);
+		cef_string_utf8_to_utf16(domain.c_str(), domain.size(), &cookie.domain);
+		cef_string_utf8_to_utf16(path.c_str(), path.size(), &cookie.path);
 
 		if (isOnlyHttp) {
 			cookie.httponly = true;
@@ -288,13 +265,10 @@ struct QCefCookieManagerInternal : PLSQCefCookieManager {
 
 /* ------------------------------------------------------------------------- */
 
-QCefWidgetInternal::QCefWidgetInternal(
-	QWidget *parent, const std::string &url_,
-	CefRefPtr<CefRequestContext> rqc_,
-	//PRISM/Zhangdewen/20230308/#/libbrowser
-	const std::string &script_,
-	const std::map<std::string, std::string> &headers_, bool allowPopups,
-	const QColor &bkgColor_, const std::string &css_)
+QCefWidgetInternal::QCefWidgetInternal(QWidget *parent, const std::string &url_, CefRefPtr<CefRequestContext> rqc_,
+				       //PRISM/Zhangdewen/20230308/#/libbrowser
+				       const std::string &script_, const std::map<std::string, std::string> &headers_,
+				       bool allowPopups, const QColor &bkgColor_, const std::string &css_)
 	: PLSQCefWidget(parent),
 	  url(url_),
 	  rqc(rqc_),
@@ -320,6 +294,14 @@ QCefWidgetInternal::QCefWidgetInternal(
 	window = new QWindow();
 	window->setFlags(Qt::FramelessWindowHint);
 #endif
+	//PRISM/jimboRen/20250604/#/add log
+	blog(LOG_INFO, "cef create cef widget. internal:%p url:see kr log", this);
+	blog(LOG_DEBUG, "cef create cef widget. internal:%p url:%s", this, url_.c_str());
+	if (pls_get_obs_exiting()) {
+		blog(LOG_ERROR, "cef create cef widget in app exiting. internal:%p, url:see kr log", this);
+		blog(LOG_DEBUG, "cef create cef widget in app exiting. internal:%p, url:%s", this, url_.c_str());
+		assert(false && "can't create widget in app exiting");
+	}
 }
 
 QCefWidgetInternal::~QCefWidgetInternal()
@@ -335,19 +317,30 @@ void QCefWidgetInternal::closeBrowser()
 		return;
 	}
 	CefRefPtr<CefBrowser> browser = cefBrowser;
+	//PRISM/jimboRen/20250604/#/add log
+	blog(LOG_INFO, "cef close browser with try: internal:%p browser:%p url:see kr log", this,
+	     (!!browser) ? browser.get() : 0x00);
+	blog(LOG_DEBUG, "cef close browser with try: internal:%p browser:%p url:%s", this,
+	     (!!browser) ? browser.get() : 0x00, url.c_str());
 	if (!!browser) {
-		auto destroyBrowser = [](CefRefPtr<CefBrowser> cefBrowser) {
-			CefRefPtr<CefClient> client =
-				cefBrowser->GetHost()->GetClient();
-			QCefBrowserClient *bc =
-				reinterpret_cast<QCefBrowserClient *>(
-					client.get());
+		auto destroyBrowser = [=](CefRefPtr<CefBrowser> cefBrowser) {
+			CefRefPtr<CefClient> client = cefBrowser->GetHost()->GetClient();
+			QCefBrowserClient *bc = reinterpret_cast<QCefBrowserClient *>(client.get());
 
+			cefBrowser->GetHost()->CloseBrowser(true);
+
+#if !defined(_WIN32) && !defined(__APPLE__) && CHROME_VERSION_BUILD >= 6533
+			QEventLoop loop;
+
+			connect(this, &QCefWidgetInternal::readyToClose, &loop, &QEventLoop::quit);
+
+			QTimer::singleShot(1000, &loop, &QEventLoop::quit);
+
+			loop.exec();
+#endif
 			if (bc) {
 				bc->widget = nullptr;
 			}
-
-			cefBrowser->GetHost()->CloseBrowser(true);
 		};
 
 		/* So you're probably wondering what's going on here.  If you
@@ -375,8 +368,7 @@ void QCefWidgetInternal::closeBrowser()
 #elif __APPLE__
 		// felt hacky, might delete later
 		void *view = (id)cefBrowser->GetHost()->GetWindowHandle();
-		blog(LOG_INFO, "cef close browser: internal:%p handle:%p", this,
-		     view);
+		blog(LOG_INFO, "cef close browser: internal:%p handle:%p browser:%p", this, view, browser.get());
 		cefViewRemoveFromSuperView(view);
 #endif
 
@@ -396,9 +388,8 @@ static bool XWindowHasAtom(Display *display, Window w, Atom a)
 	unsigned long bytesAfter;
 	unsigned char *data = NULL;
 
-	if (XGetWindowProperty(display, w, a, 0, LONG_MAX, False,
-			       AnyPropertyType, &type, &format, &nItems,
-			       &bytesAfter, &data) != Success)
+	if (XGetWindowProperty(display, w, a, 0, LONG_MAX, False, AnyPropertyType, &type, &format, &nItems, &bytesAfter,
+			       &data) != Success)
 		return false;
 
 	if (data)
@@ -419,8 +410,7 @@ void QCefWidgetInternal::unsetToplevelXdndProxy()
 	if (!cefBrowser)
 		return;
 
-	CefWindowHandle browserHandle =
-		cefBrowser->GetHost()->GetWindowHandle();
+	CefWindowHandle browserHandle = cefBrowser->GetHost()->GetWindowHandle();
 	Display *xDisplay = cef_get_xdisplay();
 	Window toplevel, root, parent, *children;
 	unsigned int nChildren;
@@ -431,15 +421,13 @@ void QCefWidgetInternal::unsetToplevelXdndProxy()
 	// Find the toplevel
 	Atom netWmPidAtom = XInternAtom(xDisplay, "_NET_WM_PID", False);
 	do {
-		if (XQueryTree(xDisplay, toplevel, &root, &parent, &children,
-			       &nChildren) == 0)
+		if (XQueryTree(xDisplay, toplevel, &root, &parent, &children, &nChildren) == 0)
 			return;
 
 		if (children)
 			XFree(children);
 
-		if (root == parent ||
-		    !XWindowHasAtom(xDisplay, parent, netWmPidAtom)) {
+		if (root == parent || !XWindowHasAtom(xDisplay, parent, netWmPidAtom)) {
 			found = true;
 			break;
 		}
@@ -451,8 +439,7 @@ void QCefWidgetInternal::unsetToplevelXdndProxy()
 
 	// Check if the XdndProxy property is set
 	Atom xDndProxyAtom = XInternAtom(xDisplay, "XdndProxy", False);
-	if (needsDeleteXdndProxy &&
-	    !XWindowHasAtom(xDisplay, toplevel, xDndProxyAtom)) {
+	if (needsDeleteXdndProxy && !XWindowHasAtom(xDisplay, toplevel, xDndProxyAtom)) {
 		QueueCEFTask([this]() { unsetToplevelXdndProxy(); });
 		return;
 	}
@@ -476,9 +463,7 @@ void QCefWidgetInternal::Init()
 		QueueCEFTask([this, handle,
 #endif
 			      //PRISM/Zhangdewen/20230308/#/libbrowser
-			      bkgColor = CefColorSetARGB(0xff, bkgColor.red(),
-							 bkgColor.green(),
-							 bkgColor.blue())]() {
+			      bkgColor = CefColorSetARGB(0xff, bkgColor.red(), bkgColor.green(), bkgColor.blue())]() {
 			//PRISM/Renjinbo/20240715/#5848/when closed browser, not init
 			if (!cef_widgets_is_valid(this)) {
 				return;
@@ -497,10 +482,13 @@ void QCefWidgetInternal::Init()
 			QSize size = this->size();
 #endif
 
+#if CHROME_VERSION_BUILD >= 6533
+			windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+#endif
+
 #if CHROME_VERSION_BUILD < 4430
 #ifdef __APPLE__
-			windowInfo.SetAsChild((CefWindowHandle)handle, 0, 0,
-					      size.width(), size.height());
+			windowInfo.SetAsChild((CefWindowHandle)handle, 0, 0, size.width(), size.height());
 #else
 #ifdef _WIN32
 			RECT rc = {0, 0, size.width(), size.height()};
@@ -510,24 +498,21 @@ void QCefWidgetInternal::Init()
 			windowInfo.SetAsChild((CefWindowHandle)handle, rc);
 #endif
 #else
-			windowInfo.SetAsChild((CefWindowHandle)handle,
-					      CefRect(0, 0, size.width(),
-						      size.height()));
+			windowInfo.SetAsChild((CefWindowHandle)handle, CefRect(0, 0, size.width(), size.height()));
 #endif
-
+			//PRISM/jimboRen/20250604/#/add log
+			blog(LOG_INFO, "[obs-browser]: call create browser sync method. internal:%p", this);
 			CefRefPtr<QCefBrowserClient> browserClient =
-				new QCefBrowserClient(
-					this, script, allowAllPopups_,
-					//PRISM/Zhangdewen/20230308/#/libbrowser
-					headers, css);
+				new QCefBrowserClient(this, script, allowAllPopups_,
+						      //PRISM/Zhangdewen/20230308/#/libbrowser
+						      headers, css);
 
 			CefBrowserSettings cefBrowserSettings;
 			//PRISM/Zhangdewen/20230308/#/libbrowser
 			cefBrowserSettings.background_color = bkgColor;
-			cefBrowser = CefBrowserHost::CreateBrowserSync(
-				windowInfo, browserClient, url,
-				cefBrowserSettings,
-				CefRefPtr<CefDictionaryValue>(), rqc);
+			cefBrowser = CefBrowserHost::CreateBrowserSync(windowInfo, browserClient, url,
+								       cefBrowserSettings,
+								       CefRefPtr<CefDictionaryValue>(), rqc);
 
 #ifdef __linux__
 			QueueCEFTask([this]() { unsetToplevelXdndProxy(); });
@@ -538,8 +523,7 @@ void QCefWidgetInternal::Init()
 		timer.stop();
 #ifndef __APPLE__
 		if (!container) {
-			container =
-				QWidget::createWindowContainer(window, this);
+			container = QWidget::createWindowContainer(window, this);
 			container->show();
 		}
 
@@ -563,18 +547,15 @@ void QCefWidgetInternal::Resize()
 		if (!cefBrowser)
 			return;
 
-		CefWindowHandle handle =
-			cefBrowser->GetHost()->GetWindowHandle();
+		CefWindowHandle handle = cefBrowser->GetHost()->GetWindowHandle();
 
 		if (!handle)
 			return;
 
 #ifdef _WIN32
-		SetWindowPos((HWND)handle, nullptr, 0, 0, size.width(),
-			     size.height(),
+		SetWindowPos((HWND)handle, nullptr, 0, 0, size.width(), size.height(),
 			     SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-		SendMessage((HWND)handle, WM_SIZE, 0,
-			    MAKELPARAM(size.width(), size.height()));
+		SendMessage((HWND)handle, WM_SIZE, 0, MAKELPARAM(size.width(), size.height()));
 #else
 		Display *xDisplay = cef_get_xdisplay();
 
@@ -586,8 +567,7 @@ void QCefWidgetInternal::Resize()
 		changes.y = 0;
 		changes.width = size.width();
 		changes.height = size.height();
-		XConfigureWindow(xDisplay, (Window)handle,
-				 CWX | CWY | CWHeight | CWWidth, &changes);
+		XConfigureWindow(xDisplay, (Window)handle, CWX | CWY | CWHeight | CWWidth, &changes);
 #if CHROME_VERSION_BUILD >= 4638
 		XSync(xDisplay, false);
 #endif
@@ -599,14 +579,18 @@ void QCefWidgetInternal::Resize()
 #endif
 }
 
+void QCefWidgetInternal::CloseSafely()
+{
+	emit readyToClose();
+}
+
 void QCefWidgetInternal::showEvent(QShowEvent *event)
 {
 	QWidget::showEvent(event);
 
 	if (!cefBrowser && cef_widgets_is_valid(this)) {
 		obs_browser_initialize();
-		connect(&timer, &QTimer::timeout, this,
-			&QCefWidgetInternal::Init);
+		connect(&timer, &QTimer::timeout, this, &QCefWidgetInternal::Init);
 		timer.start(500);
 		Init();
 	}
@@ -632,22 +616,18 @@ void QCefWidgetInternal::reloadPage()
 }
 
 //PRISM/Zhangdewen/20230308/#/libbrowser
-void QCefWidgetInternal::sendMsg(const std::wstring &type,
-				 const std::wstring &msg)
+void QCefWidgetInternal::sendMsg(const std::wstring &type, const std::wstring &msg)
 {
 	if (!cefBrowser) {
 		return;
 	}
 
-	QueueCEFTask([browser = cefBrowser, type = std::wstring(type.c_str()),
-		      msg = std::wstring(msg.c_str())]() {
-		CefRefPtr<CefProcessMessage> message =
-			CefProcessMessage::Create("sendToBrowser");
+	QueueCEFTask([browser = cefBrowser, type = std::wstring(type.c_str()), msg = std::wstring(msg.c_str())]() {
+		CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create("sendToBrowser");
 		CefRefPtr<CefListValue> args = message->GetArgumentList();
 		args->SetString(0, type);
 		args->SetString(1, msg);
-		browser->GetMainFrame()->SendProcessMessage(PID_RENDERER,
-							    message);
+		browser->GetMainFrame()->SendProcessMessage(PID_RENDERER, message);
 	});
 }
 
@@ -717,8 +697,7 @@ bool QCefWidgetInternal::zoomPage(int direction)
 //PRISM/Renjinbo/20240308/#4627/make main thread to get is dockWidget
 bool QCefWidgetInternal::event(QEvent *event)
 {
-	if (event->type() == QEvent::ShowToParent ||
-	    event->type() == QEvent::ParentChange) {
+	if (event->type() == QEvent::ShowToParent || event->type() == QEvent::ParentChange) {
 		bool isDockWidget = false;
 		QWidget *parent = this;
 		while (parent) {
@@ -747,8 +726,7 @@ void DispatchPrismEvent(const char *eventName, const char *jsonString)
 		if (!browser.get()) {
 			return;
 		}
-		CefRefPtr<CefProcessMessage> msg =
-			CefProcessMessage::Create("DispatchJSEvent");
+		CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("DispatchJSEvent");
 		CefRefPtr<CefListValue> args = msg->GetArgumentList();
 
 		args->SetString(0, event);
@@ -776,32 +754,23 @@ struct QCefInternal : PLSQCef {
 	virtual bool initialized(void) override;
 	virtual bool wait_for_browser_init(void) override;
 
-	virtual QCefWidget *
-	create_widget(QWidget *parent, const std::string &url,
-		      QCefCookieManager *cookie_manager) override;
+	virtual QCefWidget *create_widget(QWidget *parent, const std::string &url,
+					  QCefCookieManager *cookie_manager) override;
 	//PRISM/Zhangdewen/20230308/#/libbrowser
 	virtual QCefWidget *
-	create_widget(QWidget *parent, const std::string &url,
-		      const std::string &script,
+	create_widget(QWidget *parent, const std::string &url, const std::string &script,
 		      QCefCookieManager *cookie_manager,
-		      const std::map<std::string, std::string> &headers =
-			      std::map<std::string, std::string>(),
-		      bool allowPopups = false,
-		      const QColor &initBkgColor = Qt::white,
-		      const std::string &css = std::string(),
-		      bool showAtLoadEnded = false) override;
+		      const std::map<std::string, std::string> &headers = std::map<std::string, std::string>(),
+		      bool allowPopups = false, const QColor &initBkgColor = Qt::white,
+		      const std::string &css = std::string(), bool showAtLoadEnded = false) override;
 
-	virtual QCefCookieManager *
-	create_cookie_manager(const std::string &storage_path,
-			      bool persist_session_cookies) override;
+	virtual QCefCookieManager *create_cookie_manager(const std::string &storage_path,
+							 bool persist_session_cookies) override;
 
-	virtual BPtr<char>
-	get_cookie_path(const std::string &storage_path) override;
+	virtual BPtr<char> get_cookie_path(const std::string &storage_path) override;
 
-	virtual void add_popup_whitelist_url(const std::string &url,
-					     QObject *obj) override;
-	virtual void add_force_popup_url(const std::string &url,
-					 QObject *obj) override;
+	virtual void add_popup_whitelist_url(const std::string &url, QObject *obj) override;
+	virtual void add_force_popup_url(const std::string &url, QObject *obj) override;
 };
 
 bool QCefInternal::init_browser(void)
@@ -823,37 +792,27 @@ bool QCefInternal::wait_for_browser_init(void)
 	return os_event_wait(cef_started_event) == 0;
 }
 
-QCefWidget *QCefInternal::create_widget(QWidget *parent, const std::string &url,
-					QCefCookieManager *cm)
+QCefWidget *QCefInternal::create_widget(QWidget *parent, const std::string &url, QCefCookieManager *cm)
 {
-	QCefCookieManagerInternal *cmi =
-		reinterpret_cast<QCefCookieManagerInternal *>(cm);
+	QCefCookieManagerInternal *cmi = reinterpret_cast<QCefCookieManagerInternal *>(cm);
 
 	return new QCefWidgetInternal(parent, url, cmi ? cmi->rc : nullptr);
 }
 
 //PRISM/Zhangdewen/20230308/#/libbrowser
-QCefWidget *
-QCefInternal::create_widget(QWidget *parent, const std::string &url,
-			    const std::string &script_, QCefCookieManager *cm,
-			    const std::map<std::string, std::string> &headers,
-			    bool allowPopups, const QColor &initBkgColor,
-			    const std::string &css, bool)
+QCefWidget *QCefInternal::create_widget(QWidget *parent, const std::string &url, const std::string &script_,
+					QCefCookieManager *cm, const std::map<std::string, std::string> &headers,
+					bool allowPopups, const QColor &initBkgColor, const std::string &css, bool)
 {
-	QCefCookieManagerInternal *cmi =
-		reinterpret_cast<QCefCookieManagerInternal *>(cm);
-	return new QCefWidgetInternal(parent, url, cmi ? cmi->rc : nullptr,
-				      script_, headers, allowPopups,
-				      initBkgColor, css);
+	QCefCookieManagerInternal *cmi = reinterpret_cast<QCefCookieManagerInternal *>(cm);
+	return new QCefWidgetInternal(parent, url, cmi ? cmi->rc : nullptr, script_, headers, allowPopups, initBkgColor,
+				      css);
 }
 
-QCefCookieManager *
-QCefInternal::create_cookie_manager(const std::string &storage_path,
-				    bool persist_session_cookies)
+QCefCookieManager *QCefInternal::create_cookie_manager(const std::string &storage_path, bool persist_session_cookies)
 {
 	try {
-		return new QCefCookieManagerInternal(storage_path,
-						     persist_session_cookies);
+		return new QCefCookieManagerInternal(storage_path, persist_session_cookies);
 	} catch (const char *error) {
 		blog(LOG_ERROR, "Failed to create cookie manager: %s", error);
 		return nullptr;

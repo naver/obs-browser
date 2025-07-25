@@ -10,6 +10,7 @@
 
 #include "PLSInteractionMacWindow.h"
 #include "geometry_util.h"
+#include "include/wrapper/cef_helpers.h"
 
 #define VIEW_BK_RENDER_COLOR 0X151515
 #define VIEW_BK_RESIZE_COLOR 0X000000
@@ -27,26 +28,35 @@ InteractionDelegate::InteractionDelegate(BrowserSource *bs) : browser_source(bs)
 	}
 }
 
+void InteractionDelegate::showInteractionInMainThread(bool show)
+{
+	CEF_REQUIRE_UI_THREAD();
+	is_interaction_showing = show;
+
+	if (gInteractionWindow) {
+		[gInteractionWindow close];
+		gInteractionWindow = nil;
+	}
+
+	if (show) {
+		gInteractionWindow = [[PLSInteractionMacWindow alloc] init];
+		[gInteractionWindow setupData:browser_source srcDelegate:this];
+		PostInteractionTitle();
+		[gInteractionWindow.window center];
+		[gInteractionWindow.window orderFront:nil];
+		OnInteractionShow(nullptr);
+	}
+}
+
+//PRISM/jimboRen/20250317/#None/This object may be accessed asynchronously after being released
 void InteractionDelegate::ShowInteraction(bool show)
 {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		is_interaction_showing = show;
-
-		if (gInteractionWindow) {
-			[gInteractionWindow close];
-			gInteractionWindow = nil;
-		}
-
-		if (show) {
-			gInteractionWindow =
-				[[PLSInteractionMacWindow alloc] init];
-			[gInteractionWindow setupData:browser_source
-					  srcDelegate:this];
-			PostInteractionTitle();
-			[gInteractionWindow.window center];
-			[gInteractionWindow.window orderFront:nil];
-			OnInteractionShow(nullptr);
-		}
+	if ([NSThread isMainThread]) {
+		showInteractionInMainThread(show);
+		return;
+	}
+	dispatch_sync(dispatch_get_main_queue(), ^{
+		showInteractionInMainThread(show);
 	});
 }
 

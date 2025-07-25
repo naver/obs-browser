@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.16...3.25)
 
-legacy_check()
-
 option(ENABLE_BROWSER "Enable browser source plugin (required Chromium Embedded Framework)" OFF)
 
 if(NOT ENABLE_BROWSER)
@@ -11,8 +9,8 @@ if(NOT ENABLE_BROWSER)
   return()
 endif()
 
-find_package(CEF REQUIRED 95)
-find_package(nlohmann_json REQUIRED)
+find_package(CEF 95 REQUIRED)
+find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(obs-browser MODULE)
 add_library(OBS::browser ALIAS obs-browser)
@@ -33,7 +31,6 @@ target_sources(
           cef-headers.hpp
           deps/base64/base64.cpp
           deps/base64/base64.hpp
-          deps/obs-websocket-api/obs-websocket-api.h
           deps/signal-restore.cpp
           deps/signal-restore.hpp
           deps/wide-string.cpp
@@ -49,7 +46,7 @@ include(cmake/prism/prism-browser.cmake)
 target_include_directories(obs-browser PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/deps")
 
 target_compile_features(obs-browser PRIVATE cxx_std_17)
-target_link_libraries(obs-browser PRIVATE OBS::libobs OBS::frontend-api nlohmann_json::nlohmann_json)
+target_link_libraries(obs-browser PRIVATE OBS::libobs OBS::frontend-api OBS::websocket-api nlohmann_json::nlohmann_json)
 
 if(OS_WINDOWS)
   include(cmake/os-windows.cmake)

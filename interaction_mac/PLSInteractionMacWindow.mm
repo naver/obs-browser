@@ -1075,7 +1075,7 @@ static void onPrismAppQuit(enum obs_frontend_event event, void *context)
 //PRISM/Renjinbo/20231027/#2894/void * view is not nsview , is _NSViewLayoutAux, which can't constain removeFromSuperview method
 void cefViewRemoveFromSuperView(void *view)
 {
-	if (!*((bool *)view)) {
+	if (view == nullptr) {
 		blog(LOG_ERROR,
 		     "cef view Failed to remove from superview. instance is not valid");
 

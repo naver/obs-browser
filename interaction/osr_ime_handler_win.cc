@@ -61,9 +61,9 @@ void GetCompositionUnderlines(
     int target_end,
     std::vector<CefCompositionUnderline>& underlines) {
   int clause_size = ::ImmGetCompositionString(imc, GCS_COMPCLAUSE, NULL, 0);
-  int clause_length = clause_size / sizeof(uint32);
+  int clause_length = clause_size / sizeof(uint32_t);
   if (clause_length) {
-    std::vector<uint32> clause_data(clause_length);
+    std::vector<uint32_t> clause_data(clause_length);
 
     ::ImmGetCompositionString(imc, GCS_COMPCLAUSE, &clause_data[0],
                               clause_size);
@@ -76,8 +76,7 @@ void GetCompositionUnderlines(
       underline.thick = 0;
 
       // Use thick underline for the target clause.
-      if (underline.range.from >= target_start &&
-          underline.range.to <= target_end) {
+      if (static_cast<int>(underline.range.from) >= target_start && static_cast<int>(underline.range.to) <= target_end) {
         underline.thick = 1;
       }
       underlines.push_back(underline);
@@ -154,8 +153,8 @@ void OsrImeHandlerWin::MoveImeWindow() {
     location = composition_range_.from;
 
   // Offset location by the composition range start if required.
-  if (location >= composition_range_.from)
-    location -= composition_range_.from;
+  if (location >= static_cast<int>(composition_range_.from))
+    location -= static_cast<int>(composition_range_.from);
 
   if (location < static_cast<int>(composition_bounds_.size()))
     rc = composition_bounds_[location];
